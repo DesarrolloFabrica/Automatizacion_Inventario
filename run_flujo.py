@@ -28,20 +28,14 @@ Opciones: --schema (default fabrica), --simular, --forzar-carga,
 (repetible) y --no-interactivo. Si hay que autorizar Google de nuevo:
 python renovar_token.py.
 
-Códigos de salida: 0 todos los lotes con destino y clonación en orden;
-1 prevalidación fallida o algún lote fallido; 2 reservado para "con pendientes"
-(fase 2).
+Códigos de salida: 0 todos los lotes convertidos y verificados; 1 prevalidación
+fallida o algún lote fallido; 2 hay lotes con diferencias retenidos por la compuerta.
 
-Estado de la migración: fase 1
+Estado de la migración: fase 2
 ------------------------------
-HACE: prevalidación completa, token único, carpeta destino automática,
-clonación en proceso (sin subprocess) con nombre canónico, estado de corrida
-(JSON + Excel) y log por corrida.
-PENDIENTE (fases siguientes): conversión JPG→PNG en el clon, verificación
-origen↔clon, compuerta, carga al esquema `fabrica` de Cloud SQL solo de los
-lotes verificados y un único correo final (más correo de fallo en lenguaje
-llano). Esos pasos quedan marcados como "pendiente" en el estado. Los scripts
-antiguos (CAMBIAR_FORMATO, CLONACION_CARPETA, LMS_Fabrica) no se tocan aún.
+HACE: prevalidación, destino, clonación, conversión JPG→PNG en el clon,
+verificación, inventario y compuerta. PENDIENTE (fase 3): carga al esquema
+`fabrica` y correo único final. Los scripts antiguos no se modifican.
 """
 
 from __future__ import annotations
@@ -58,15 +52,18 @@ from flujo_lib.clonacion import clonar_arbol  # noqa: E402
 from flujo_lib.destino import describir, resolver_destino  # noqa: E402
 from flujo_lib.estado import DIR_CORRIDAS, ETIQUETAS_ESTADO, PASOS, EstadoCorrida  # noqa: E402
 from flujo_lib.excel import Lote, resolver_excel  # noqa: E402
+from flujo_lib.formato import convertir_arbol  # noqa: E402
+from flujo_lib.inventario import generar_inventario, publicar_inventario  # noqa: E402
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion  # noqa: E402
-from flujo_lib.prevalidacion import ResultadoPrevalidacion, prevalidar  # noqa: E402
+from flujo_lib.prevalidacion import ResultadoPrevalidacion, correos_aviso, prevalidar  # noqa: E402
+from flujo_lib.verificacion import verificar_lote  # noqa: E402
 
 SCHEMA_DEFECTO = "fabrica"  # producción: el run único carga ahí por decisión del usuario
 PASOS_REHACER = PASOS + ("todo",)
-PASOS_PENDIENTES = ("formato", "verificacion", "carga")  # se implementan en fases siguientes
-NOTA_PENDIENTE = "Pendiente: se implementa en la siguiente fase del flujo"
+PASOS_PENDIENTES = ("carga",)
+NOTA_PENDIENTE = "Pendiente: la carga se implementa en la fase 3 del flujo"
 NOTA_OMITIDO = "No se ejecutó porque falló el paso anterior"
-NOTA_FASES = "Conversión, verificación, carga a GCP y correo se incorporan en las fases siguientes."
+NOTA_FASES = "La carga a GCP y el correo único se incorporan en la fase 3."
 ACCION_REINTENTAR_COPIA = (
     "Vuelve a ejecutar; solo se copiará lo que falta. "
     "Si persiste, revisa permisos de esos archivos."
@@ -84,8 +81,8 @@ def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run_flujo.py",
         description=(
-            "Run único de la fábrica de contenidos: prevalida, crea la carpeta destino "
-            "y clona cada lote de RUTAS.xlsx (fase 1)."
+            "Run único de la fábrica de contenidos: prevalida, clona, convierte, "
+            "verifica e inventaría cada lote de RUTAS.xlsx (fase 2)."
         ),
         epilog='Ejemplo: python run_flujo.py --excel "C:\\ruta\\RUTAS.xlsx"',
     )
@@ -220,16 +217,19 @@ def imprimir_hallazgos(res: ResultadoPrevalidacion) -> None:
 
 
 def imprimir_resumen(estado: EstadoCorrida, lotes: list[Lote]) -> None:
-    """Tabla de texto alineada: etiqueta, carpeta destino, estado destino y clonación."""
+    """Tabla de texto alineada con todos los pasos por lote."""
     claves = {lote.clave for lote in lotes}
     filas = [r for r in estado.resumen() if r["clave"] in claves]
-    cabecera = ("Etiqueta", "Carpeta destino", "Destino", "Clonación")
+    cabecera = ("Etiqueta", "Carpeta destino", "Destino", "Clonación", "Formato", "Verificación", "Carga")
     tabla = [
         (
             str(r["etiqueta"]),
             str(r["destino_nombre"] or "-"),
             ETIQUETAS_ESTADO.get(r["pasos"]["destino"], r["pasos"]["destino"]),
             ETIQUETAS_ESTADO.get(r["pasos"]["clonacion"], r["pasos"]["clonacion"]),
+            ETIQUETAS_ESTADO.get(r["pasos"]["formato"], r["pasos"]["formato"]),
+            ETIQUETAS_ESTADO.get(r["pasos"]["verificacion"], r["pasos"]["verificacion"]),
+            ETIQUETAS_ESTADO.get(r["pasos"]["carga"], r["pasos"]["carga"]),
         )
         for r in filas
     ]
@@ -383,6 +383,53 @@ def clonar_lote(
     return True
 
 
+def convertir_lote(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str]) -> bool:
+    clave = lote.clave
+    if estado.completado(clave, "formato") and "formato" not in rehacer:
+        logging.info("Lote «%s»: formato ya completado en una corrida anterior.", lote.etiqueta)
+        return True
+    estado.marcar(clave, "formato", "en_curso", detalle="Convirtiendo JPG/JPEG a PNG en el clon")
+    try:
+        resumen = convertir_arbol(svc, destino_id, log=logging.info)
+    except Exception as e:
+        _fallar_paso(estado, lote, "formato", traducir_excepcion(e, paso="formato", contexto=f"el lote «{lote.etiqueta}»"))
+        return False
+    if not resumen.ok():
+        _fallar_paso(estado, lote, "formato", ErrorFlujo(
+            f"No se pudieron convertir {len(resumen.errores)} archivo(s) del lote «{lote.etiqueta}».",
+            "Vuelve a ejecutar. Si persiste, revisa que los JPG sean imágenes válidas.",
+            paso="formato", detalle="\n".join(resumen.errores),
+        ))
+        return False
+    estado.marcar(clave, "formato", "ok", detalle=resumen.texto())
+    return True
+
+
+def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str]) -> bool:
+    clave = lote.clave
+    if estado.completado(clave, "verificacion") and "verificacion" not in rehacer:
+        return True
+    try:
+        resultado = verificar_lote(
+            svc, lote.origen_id, destino_id,
+            programa=estado.destino_de(clave)[1] or lote.etiqueta,
+            meta={"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp},
+        )
+    except Exception as e:
+        _fallar_paso(
+            estado, lote, "verificacion",
+            traducir_excepcion(e, paso="verificacion", contexto=f"el lote «{lote.etiqueta}»"),
+        )
+        return False
+    detalle = "\n".join(resultado.hallazgos) if resultado.hallazgos else resultado.texto()
+    estado.marcar(clave, "verificacion", resultado.estado, detalle=detalle)
+    if resultado.estado == "con_diferencias":
+        logging.warning("Lote «%s»: %s Revisa el detalle antes de cargar.", lote.etiqueta, resultado.texto())
+        return False
+    logging.info("Lote «%s»: verificación correcta.", lote.etiqueta)
+    return True
+
+
 def anotar_pendientes(estado: EstadoCorrida, clave: str) -> None:
     """
     Formato, verificación y carga aún no existen en esta fase: se dejan en
@@ -399,9 +446,10 @@ def anotar_pendientes(estado: EstadoCorrida, clave: str) -> None:
 
 
 def procesar_lote(
-    estado: EstadoCorrida, svc, lote: Lote, carpetas: dict[str, dict], rehacer: set[str]
+    estado: EstadoCorrida, svc, lote: Lote, carpetas: dict[str, dict], rehacer: set[str],
+    forzar_carga: bool = False,
 ) -> bool:
-    """Destino → clonación → (pendientes). True si destino y clonación quedaron en ok."""
+    """Destino → clonación → formato → verificación → compuerta."""
     estado.registrar_lote(lote)
     logging.info("=" * 60)
     logging.info("Lote «%s» (fila %s, cliente %s)", lote.etiqueta, lote.fila, lote.cliente_excel)
@@ -410,8 +458,16 @@ def procesar_lote(
         return False
     if not clonar_lote(estado, svc, lote, destino[0], destino[1], rehacer):
         return False
-    anotar_pendientes(estado, lote.clave)
-    return True
+    if not convertir_lote(estado, svc, lote, destino[0], rehacer):
+        return False
+    verificado = verificar_paso(estado, svc, lote, destino[0], rehacer)
+    if not verificado and not forzar_carga:
+        estado.marcar(lote.clave, "carga", "omitido", detalle="Retenido por la compuerta: la verificación encontró diferencias")
+    elif estado.paso(lote.clave, "carga")["estado"] in ("omitido", "pendiente"):
+        estado.marcar(lote.clave, "carga", "pendiente", detalle=NOTA_PENDIENTE)
+    if verificado or forzar_carga:
+        anotar_pendientes(estado, lote.clave)
+    return verificado
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +483,7 @@ def _cerrar_sin_fallar(estado: EstadoCorrida, resultado: str) -> None:
 def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrida, ruta_log: Path) -> int:
     """Prevalidación → lotes → cierre. Devuelve el código de salida."""
     rehacer = pasos_a_rehacer(args.rehacer)
-    logging.info("Run único de la fábrica de contenidos (fase 1)")
+    logging.info("Run único de la fábrica de contenidos (fase 2)")
     logging.info("  Excel   : %s", excel)
     logging.info(
         "  Esquema : %s%s",
@@ -463,11 +519,29 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
             return 0
 
         logging.info("Prevalidación correcta. Procesando %d lote(s)...", len(res.lotes))
-        exitos = sum(
-            1 for lote in res.lotes if procesar_lote(estado, res.svc, lote, res.carpetas, rehacer)
-        )
-        todo_ok = exitos == len(res.lotes)
-        estado.cerrar_corrida("ok" if todo_ok else "fallido")
+        exitos = sum(1 for lote in res.lotes if procesar_lote(
+            estado, res.svc, lote, res.carpetas, rehacer, args.forzar_carga
+        ))
+        trabajos = []
+        for lote in res.lotes:
+            destino_id, destino_nombre = estado.destino_de(lote.clave)
+            if destino_id:
+                trabajos.append({
+                    "etiqueta": lote.etiqueta, "origen_id": lote.origen_id,
+                    "destino_id": destino_id, "origen_nombre": destino_nombre,
+                    "destino_nombre": destino_nombre,
+                })
+        if trabajos:
+            ruta_inventario = Path(args.dir_corridas) / f"{excel.stem}.inventario.xlsx"
+            generar_inventario(res.svc, trabajos, ruta_inventario)
+            enlace = publicar_inventario(res.creds, ruta_inventario, correos_aviso())
+            estado.datos["inventario"] = {"xlsx": str(ruta_inventario), "sheet": enlace}
+            estado.guardar()
+        filas_actuales = {l.clave: estado.datos["lotes"][l.clave] for l in res.lotes}
+        hay_fallos = any(any(p.get("estado") == "fallido" for p in d["pasos"].values()) for d in filas_actuales.values())
+        hay_diferencias = any(d["pasos"]["verificacion"].get("estado") == "con_diferencias" for d in filas_actuales.values())
+        resultado_final = "fallido" if hay_fallos else "con_pendientes" if hay_diferencias else "ok"
+        estado.cerrar_corrida(resultado_final)
     except KeyboardInterrupt:
         logging.error("Corrida interrumpida por el usuario. Vuelve a ejecutar para retomar donde quedó.")
         _cerrar_sin_fallar(estado, "interrumpido")
@@ -485,18 +559,20 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
     ruta_xlsx = exportar_estado(estado)
     logging.info("=" * 60)
     imprimir_resumen(estado, res.lotes)
-    if todo_ok:
-        logging.info("Corrida terminada: %d lote(s) con destino y clonación en orden.", exitos)
-    else:
+    if hay_fallos:
         logging.error(
-            "Corrida terminada con fallos: %d de %d lote(s) en orden. "
+            "Corrida terminada con fallos: %d de %d lote(s) verificados. "
             "Revisa la columna «Qué hacer» del Excel de estado y vuelve a ejecutar.",
             exitos,
             len(res.lotes),
         )
+    elif hay_diferencias:
+        logging.warning("Corrida terminada con pendientes: %d lote(s) tienen diferencias y quedaron retenidos.", len(res.lotes) - exitos)
+    else:
+        logging.info("Corrida terminada: %d lote(s) convertidos y verificados.", exitos)
     imprimir_rutas(estado, ruta_log, ruta_xlsx)
     logging.info(NOTA_FASES)
-    return 0 if todo_ok else 1
+    return 1 if hay_fallos else 2 if hay_diferencias else 0
 
 
 def main(argv: list[str] | None = None) -> int:

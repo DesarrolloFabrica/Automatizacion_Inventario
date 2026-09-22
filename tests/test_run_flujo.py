@@ -14,6 +14,8 @@ import openpyxl
 
 import run_flujo
 from flujo_lib import clonacion
+from flujo_lib.formato import ResumenFormato
+from flujo_lib.verificacion import ResultadoVerificacion
 from flujo_lib.mensajes import ErrorFlujo
 from flujo_lib.nombres import nombre_canonico
 from tests.fake_drive import FakeDrive, hacer_http_error
@@ -120,6 +122,10 @@ class BaseRunFlujo(unittest.TestCase):
             mock.patch("flujo_lib.prevalidacion.drive.construir_servicio", lambda _creds: self.svc),
             mock.patch("flujo_lib.prevalidacion._conectar_psycopg2", self.db),
             mock.patch("run_flujo.clonar_arbol", espia_clonar),
+            mock.patch("run_flujo.convertir_arbol", return_value=ResumenFormato()),
+            mock.patch("run_flujo.verificar_lote", return_value=ResultadoVerificacion()),
+            mock.patch("run_flujo.generar_inventario", side_effect=lambda _s, _t, salida: salida),
+            mock.patch("run_flujo.publicar_inventario", return_value="https://docs.google.com/spreadsheets/d/fake/edit"),
             mock.patch.dict(os.environ, ENV_OK),
         ]
         for p in parches:
@@ -216,8 +222,8 @@ class TestCorridaFeliz(BaseRunFlujo):
         esperado = {
             "destino": "ok",
             "clonacion": "ok",
-            "formato": "pendiente",
-            "verificacion": "pendiente",
+            "formato": "ok",
+            "verificacion": "ok",
             "carga": "pendiente",
         }
         self.assertEqual(self.pasos(ORIGEN_A), esperado)
@@ -230,7 +236,7 @@ class TestCorridaFeliz(BaseRunFlujo):
         self.assertIsNone(lote_a["ultimo_error"])
         self.assertIn("creada «Bogotá 2026» dentro de «LMS_Carga»", lote_a["pasos"]["destino"]["detalle"])
         self.assertIn("3 archivo(s) copiado(s)", lote_a["pasos"]["clonacion"]["detalle"])
-        self.assertEqual(lote_a["pasos"]["formato"]["detalle"], run_flujo.NOTA_PENDIENTE)
+        self.assertIn("convertido", lote_a["pasos"]["formato"]["detalle"])
         self.assertEqual(lote_a["pasos"]["carga"]["detalle"], run_flujo.NOTA_PENDIENTE)
 
         # Excel de estado y log de la corrida.
@@ -241,7 +247,7 @@ class TestCorridaFeliz(BaseRunFlujo):
         self.assertEqual([c.value for c in hoja[2]][:4], ["Bogotá", 2, "PRODUCTO", "Bogotá 2026"])
         self.assertEqual(hoja.cell(2, 6).value, "OK")
         self.assertEqual(hoja.cell(2, 7).value, "OK")
-        self.assertEqual(hoja.cell(2, 8).value, "Pendiente")
+        self.assertEqual(hoja.cell(2, 8).value, "OK")
         libro.close()
         logs = self.logs()
         self.assertEqual(len(logs), 1)
@@ -335,6 +341,19 @@ class TestCorridaFeliz(BaseRunFlujo):
         self.assertEqual(lote["pasos"]["destino"]["estado"], "ok")
         self.assertEqual(lote["pasos"]["clonacion"]["estado"], "ok")
         self.assertEqual(_arbol(self.fake, ORIGEN_A), _arbol(self.fake, lote["destino_id"]))
+
+    def test_compuerta_retenida_y_forzada(self):
+        excel = self.excel([CABECERA, ["PRODUCTO", "Bogotá", ORIGEN_A, RAIZ]])
+        diferencia = ResultadoVerificacion("con_diferencias", ["Archivo mal ubicado: x.pdf."])
+        with mock.patch("run_flujo.verificar_lote", return_value=diferencia):
+            self.assertEqual(self.correr(excel), 2)
+        self.assertEqual(self.lote(ORIGEN_A)["pasos"]["carga"]["estado"], "omitido")
+
+        with mock.patch("run_flujo.verificar_lote", return_value=diferencia):
+            self.assertEqual(self.correr(excel, "--rehacer", "verificacion", "--forzar-carga"), 2)
+        lote = self.lote(ORIGEN_A)
+        self.assertEqual(lote["pasos"]["verificacion"]["estado"], "con_diferencias")
+        self.assertEqual(lote["pasos"]["carga"]["estado"], "pendiente")
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +521,7 @@ class TestFallosPorLote(BaseRunFlujo):
         )
         self.assertEqual(
             self.pasos(ORIGEN_B),
-            {"destino": "ok", "clonacion": "ok", "formato": "pendiente", "verificacion": "pendiente", "carga": "pendiente"},
+            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "pendiente"},
         )
         lote_a = self.lote(ORIGEN_A)
         paso = lote_a["pasos"]["clonacion"]
@@ -528,7 +547,7 @@ class TestFallosPorLote(BaseRunFlujo):
         self.assertIn("Lote «Bogotá»: No se pudieron copiar 1 archivo(s) del lote «Bogotá».", consola)
         self.assertRegex(consola, r"Bogotá\s+Bogotá 2026\s+OK\s+Fallido")
         self.assertRegex(consola, r"Medellín\s+Medellín 2026\s+OK\s+OK")
-        self.assertIn("Corrida terminada con fallos: 1 de 2 lote(s) en orden.", consola)
+        self.assertIn("Corrida terminada con fallos: 1 de 2 lote(s) verificados.", consola)
         # En el Excel de estado se ve qué pasó y qué hacer.
         libro = openpyxl.load_workbook(self.dir_corridas / "RUTAS.estado.xlsx")
         hoja = libro["Estado"]
@@ -550,11 +569,11 @@ class TestFallosPorLote(BaseRunFlujo):
         self.assertEqual(self.fake.llamadas["copy"], copias + 1)  # solo lo que faltaba
         self.assertEqual(
             self.pasos(ORIGEN_A),
-            {"destino": "ok", "clonacion": "ok", "formato": "pendiente", "verificacion": "pendiente", "carga": "pendiente"},
+            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "pendiente"},
         )
         lote_a = self.lote(ORIGEN_A)
         self.assertIsNone(lote_a["ultimo_error"])
-        self.assertEqual(lote_a["pasos"]["formato"]["detalle"], run_flujo.NOTA_PENDIENTE)
+        self.assertIn("convertido", lote_a["pasos"]["formato"]["detalle"])
         sub_a = self.subcarpeta("Bogotá 2026")
         self.assertEqual(len(sub_a), 1)
         self.assertEqual(_arbol(self.fake, sub_a[0]["id"]), _arbol(self.fake, ORIGEN_A))

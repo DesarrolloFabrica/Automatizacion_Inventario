@@ -33,13 +33,13 @@ Otras decisiones fijas:
 - Primera entrega: un comando ejecutado por una persona. Frontend/backend vienen después; por eso toda la lógica vive en `flujo_lib/` y `run_flujo.py` solo orquesta.
 
 
-## 2. Estado actual (fase 1 implementada, revisada y SIN commit)
+## 2. Estado actual (fases 1 y 2 implementadas y revisadas, SIN commit)
 
 Todo está en el árbol de trabajo, sin commit. Suite verificada al corte:
 
 ```
 python -m unittest discover -s tests
-Ran 247 tests  OK
+Ran 255 tests  OK
 ```
 
 Revisión adversarial terminada el 2026-09-22. Se corrigieron dos hallazgos:
@@ -60,10 +60,13 @@ Nuevo:
 | `flujo_lib/excel.py` | `leer_lotes` (todas las validaciones juntas, `cliente` obligatorio), `Lote`, `resolver_excel` |
 | `flujo_lib/destino.py` | `resolver_destino`: crea/reutiliza la carpeta con el nombre del origen dentro de la raíz |
 | `flujo_lib/clonacion.py` | Port de `CLONACION_CARPETA/clone_carpeta_drive.py` (copiar + igualar) con nombre canónico; `clonar_arbol` → `ResumenClon` |
+| `flujo_lib/formato.py` | Conversión recursiva e idempotente JPG/JPEG → PNG únicamente en el clon; el JPG va a la papelera después de crear el PNG |
+| `flujo_lib/verificacion.py` | Completitud canónica, integridad, ubicación por tipo e indexabilidad; resultado `ok` / `con_diferencias` |
+| `flujo_lib/inventario.py` | Adaptador del inventario y publicación heredados con nombres canónicos para archivos |
 | `flujo_lib/estado.py` | `EstadoCorrida`: JSON por Excel, pasos `destino, clonacion, formato, verificacion, carga`, `exportar_excel` |
 | `flujo_lib/prevalidacion.py` | `prevalidar` → hallazgos ok/aviso/error por área (excel, token, drive, correo, db) |
 | `flujo_lib/README.md` | Descripción de la librería y cómo correr pruebas |
-| `run_flujo.py` | REEMPLAZADO: orquestador en proceso único. Hoy hace prevalidación, destino y clonación; deja formato/verificación/carga en `pendiente` |
+| `run_flujo.py` | Orquestador en proceso único hasta formato, verificación, inventario y compuerta; deja la carga en `pendiente` o `omitido` |
 | `renovar_token.py` | Autorización interactiva del token único |
 | `tests/fake_drive.py` | Drive simulado en memoria (get/list/create/copy/update/about, fallos inyectables) |
 | `tests/test_*.py` | Pruebas de cada módulo |
@@ -85,17 +88,17 @@ Se revisó con estos tres lentes y se corrigieron los hallazgos descritos en la 
 - Estado y reanudación: segunda corrida salta lo correcto; destino creado pero clon fallido reanuda con el mismo id; carpeta destino borrada en Drive entre corridas (¿revalidar el id?); Excel que cambia (filas nuevas/eliminadas, lotes huérfanos); `exportar_excel` con el xlsx abierto no debe tumbar el run; handlers de logging duplicados si `main` se llama dos veces.
 - Pruebas, mensajes y docs: asserts triviales o mocks que oculten lógica; parser de `q` del FakeDrive vs lo que genera `flujo_lib.drive`; mensajes al operador sin jerga y con acción; docs vs código (opciones, defaults, rutas, códigos de salida).
 
-### 3.1 Fase 2: conversión en el clon, verificación, compuerta
+### 3.1 Fase 2: conversión en el clon, verificación, compuerta — COMPLETADA
 
-- `flujo_lib/formato.py`: port de `CAMBIAR_FORMATO/convertir_jpg_a_png.py` operando sobre `destino_id` del lote. Todos los JPG/JPEG del árbol (como el Apps Script original), PNG con `nombre_png`, JPG del clon a la papelera, contadores, idempotente (si ya existe el PNG con contenido, no repetir). Descarga/subida con `MediaIoBaseDownload`/`MediaIoBaseUpload` y Pillow; el FakeDrive necesita `get_media` y `create` con `media_body` (ya previsto).
-- `flujo_lib/verificacion.py`: por lote, contra el origen:
+- `flujo_lib/formato.py`: implementado y cubierto por pruebas, incluida recursión, reanudación y garantía de no tocar el origen.
+- `flujo_lib/verificacion.py`: implementado por lote, contra el origen:
   - Completitud: cada archivo del origen tiene su par en el clon por nombre canónico y no sobra nada.
   - Integridad: mismo `size` y `md5Checksum` para archivos no convertidos (Drive no da md5 para documentos nativos de Google: comparar solo nombre); PNG convertidos con `size > 0`; ningún `.jpg/.jpeg` restante en el clon.
   - Ubicación: extensión permitida según el tipo de carpeta padre (tabla de la sección 1; reutilizar `_es_tipo_material` de `CLONACION_CARPETA/reporte_inventario_clon.py`).
   - Indexabilidad: que `LMS_Fabrica/generar_base_rutas.parsear_ruta_programa` (o `parsear_ruta`) clasifique cada archivo; los que no, se listan como "no indexables".
   - Resultado: `ok` / `con_diferencias` con lista de hallazgos legibles; se guarda en estado.
-- Inventario: reutilizar `reporte_inventario_clon.generar_reporte_excel` y `publicar_inventario_sheets.publicar_xlsx_en_sheets` (importarlos o moverlos a `flujo_lib/inventario.py`) haciendo la comparación por nombre canónico.
-- Compuerta en `run_flujo.py`: lotes `con_diferencias` no pasan a carga salvo `--forzar-carga`. Código de salida 2 = con pendientes.
+- Inventario: implementado en `flujo_lib/inventario.py`; reutiliza los módulos heredados mediante una vista canónica sin modificarlos.
+- Compuerta en `run_flujo.py`: implementada. Los lotes `con_diferencias` quedan con carga `omitido`, salvo `--forzar-carga`, que los deja `pendiente` para fase 3. Código de salida 2 = con pendientes.
 
 ### 3.2 Fase 3: carga a GCP y correo único
 
