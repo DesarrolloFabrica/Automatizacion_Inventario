@@ -11,15 +11,68 @@ RAÍZ
   DOCUMENTACION_PROCESO.md   Secuencia operativa
   DICCIONARIO_DATOS_EXCEL.md Columnas de RUTAS.xlsx
   CHECKLIST_ENTREGA.md       Verificación de cierre
-  run_flujo.py               Orquestador del flujo
-  rutas_excel.py             Resolución de RUTAS.xlsx
   ARCHIVOS.md                Este listado
+  run_flujo.py               Run único. Fase 1: prevalidación, carpeta destino
+                             automática y clonación por lote, con estado en
+                             corridas/. Conversión, verificación, carga y correo
+                             quedan "Pendiente" (fases 2 y 3)
+  renovar_token.py           Autoriza la cuenta fábrica de contenidos y genera
+                             el token único (token.json en la raíz)
+  rutas_excel.py             Resolución de RUTAS.xlsx
   .gitignore                 Exclusión de secretos y artefactos
   .env.example               Plantilla de variables de entorno
 
+  Excluidos del repositorio: credentials.json, token.json, .env, corridas/
+
 
 ==================================================
-CAMBIAR_FORMATO/
+flujo_lib/  (librería compartida del run único)
+==================================================
+
+  __init__.py                ROOT (raíz del repo); sin imports pesados
+  mensajes.py                ErrorFlujo (qué pasó + qué hacer) y traducir_excepcion
+  drive.py                   Token único (Drive + Sheets + Gmail), reintentos,
+                             listado, lectura y creación de carpetas sin duplicar
+  nombres.py                 Nombre canónico de archivos (jpg/jpeg ≡ png)
+  excel.py                   Lectura y validación de RUTAS.xlsx (todos los errores juntos)
+  destino.py                 Carpeta destino automática dentro de la raíz
+  clonacion.py               Clonación reanudable origen → destino (port de
+                             clone_carpeta_drive.py con nombre canónico)
+  estado.py                  Estado por lote en corridas/<excel>.estado.json y
+                             exportación a Excel
+  prevalidacion.py           Revisión previa: Excel, token, Drive, correos, base de datos
+  README.md                  Documentación de la librería y de las pruebas
+
+
+==================================================
+tests/  (unittest; sin red, sin credenciales)
+==================================================
+
+  __init__.py                Paquete de pruebas
+  fake_drive.py              Drive falso en memoria compartido por las pruebas
+  test_mensajes.py           ErrorFlujo y traducción de excepciones
+  test_drive.py              Token, reintentos, listado, carpetas
+  test_nombres.py            Nombre canónico
+  test_excel.py              Lectura y validación del Excel
+  test_destino.py            Resolución de la carpeta destino
+  test_clonacion.py          Clonación con el Drive falso
+  test_estado.py             Estado de corrida y Excel de estado
+  test_prevalidacion.py      Prevalidación con Drive y base de datos falsos
+
+  Ejecución: python -m unittest discover -s tests -v   (desde la raíz)
+
+
+==================================================
+corridas/  (no versionado; lo crea el run único)
+==================================================
+
+  <excel>.estado.json        Estado por lote y paso; permite reanudar
+  <excel>.estado.xlsx        El mismo estado en Excel (colores por paso, Qué pasó / Qué hacer)
+  logs/<id>_<excel>.log      Log de cada corrida con el detalle técnico
+
+
+==================================================
+CAMBIAR_FORMATO/  (script por módulo)
 ==================================================
 
   convertir_jpg_a_png.py     Conversión JPG/JPEG → PNG en Drive
@@ -32,14 +85,14 @@ CAMBIAR_FORMATO/
 
 
 ==================================================
-CLONACION_CARPETA/
+CLONACION_CARPETA/  (script por módulo)
 ==================================================
 
   clone_carpeta_drive.py         Entrada del bloque (clonación + encadenamiento)
   reporte_inventario_clon.py     Reporte de inventario
   publicar_inventario_sheets.py  Publicación en Google Sheets
   notificar_clonacion.py         Correo 1
-  renovar_token.py               Regeneración de token.json
+  renovar_token.py               Regeneración del token.json propio del módulo
   comparar_clon_drive.py         Diagnóstico (fuera del flujo diario)
   .env.example                   Plantilla
   requirements.txt / README.md
@@ -49,7 +102,7 @@ CLONACION_CARPETA/
 
 
 ==================================================
-LMS_Fabrica/
+LMS_Fabrica/  (script por módulo)
 ==================================================
 
   generar_base_rutas.py      Excel → CSV
@@ -68,14 +121,22 @@ LMS_Fabrica/
 ENTRADAS DEL FLUJO
 ==================================================
 
-Origen, destino y cliente se toman de RUTAS.xlsx.
-La carpeta de conversión JPG→PNG se indica con --carpeta / --carpeta-formato.
+Run único: todo sale de RUTAS.xlsx (cliente, etiqueta, origen, destino).
+`destino` es la carpeta raíz; la carpeta del programa la crea el flujo con el
+nombre del origen. No hay parámetros por lote.
+
+Scripts por módulo: RUTAS.xlsx con destino = carpeta final; la carpeta de
+conversión JPG→PNG se indica con --carpeta en convertir_jpg_a_png.py.
 
 
 ==================================================
 NOTIFICACIONES
 ==================================================
 
+Run único: un único correo final por corrida con el Excel de estado
+(y correo de fallo en lenguaje llano). Pendiente de fase 3.
+
+Scripts por módulo:
   Tras la clonación  -> notificar_clonacion.py  -> enlace Google Sheet
   Tras la carga GCP  -> notificar_carga_lms.py  -> resumen + consulta SQL
 
@@ -84,7 +145,14 @@ NOTIFICACIONES
 EJECUCIÓN
 ==================================================
 
-  python run_flujo.py --excel "<RUTA>\RUTAS.xlsx" --carpeta-formato "https://drive.google.com/drive/folders/<ID_CARPETA>"
+Run único (recomendado):
+
+  python run_flujo.py --excel "<RUTA>\RUTAS.xlsx"
+  python run_flujo.py --excel "<RUTA>\RUTAS.xlsx" --solo-prevalidar
+  python run_flujo.py --excel "<RUTA>\RUTAS.xlsx" --rehacer clonacion
+  python renovar_token.py        (solo cuando el flujo pide autorizar)
+
+Scripts por módulo (semántica anterior, hasta terminar la migración):
 
   cd CAMBIAR_FORMATO
   python convertir_jpg_a_png.py --carpeta "https://drive.google.com/drive/folders/<ID_CARPETA>"

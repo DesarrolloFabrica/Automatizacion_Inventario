@@ -14,6 +14,7 @@ token.json
 **/token.json
 
 # --- Artefactos de corridas ---
+corridas/
 *.log
 **/clonacion.log
 hoja_inventario_id.txt
