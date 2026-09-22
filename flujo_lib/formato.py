@@ -49,9 +49,39 @@ def _a_png(contenido: bytes) -> bytes:
     return salida.getvalue()
 
 
-def convertir_arbol(svc, raiz_id: str, *, log=lambda _m: None, listar=drive.listar_hijos) -> ResumenFormato:
-    """Convierte todos los JPG del subárbol; nunca recibe ni modifica el ID del origen."""
+def _contar_jpg(svc, carpeta_id: str, listar) -> int:
+    """Cuántos JPG/JPEG hay en el subárbol (para saber el total del avance)."""
+    total = 0
+    for hijo in listar(svc, carpeta_id):
+        if hijo.get("mimeType") == MIME_FOLDER:
+            total += _contar_jpg(svc, hijo["id"], listar)
+        elif es_jpg(hijo["name"]):
+            total += 1
+    return total
+
+
+def convertir_arbol(
+    svc, raiz_id: str, *, log=lambda _m: None, listar=drive.listar_hijos, avance=None
+) -> ResumenFormato:
+    """
+    Convierte todos los JPG del subárbol; nunca recibe ni modifica el ID del origen.
+
+    `avance` es un callable(hechos, total, mensaje) opcional: el total son los
+    JPG/JPEG que había al empezar y se avanza por cada uno resuelto (convertido,
+    ya convertido o con error, para que la barra no se quede a medias). Con
+    `avance=None` no se cuenta nada ni cambia el comportamiento.
+    """
     resumen = ResumenFormato()
+    estado = {"hechos": 0, "total": 0}
+    if avance is not None:
+        estado["total"] = _contar_jpg(svc, raiz_id, listar)
+        avance(0, estado["total"], f"{estado['total']} imagen(es) por convertir")
+
+    def informar(nombre: str) -> None:
+        if avance is None:
+            return
+        estado["hechos"] += 1
+        avance(estado["hechos"], estado["total"], nombre)
 
     def recorrer(carpeta_id: str, ruta: str) -> None:
         hijos = listar(svc, carpeta_id)
@@ -84,6 +114,9 @@ def convertir_arbol(svc, raiz_id: str, *, log=lambda _m: None, listar=drive.list
                 log(f"  [formato] {relativa} → {nombre_nuevo}")
             except Exception as e:
                 resumen.errores.append(f"{relativa}: {e}")
+            finally:
+                # También cuenta el que falló: la barra no puede quedarse a medias.
+                informar(archivo["name"])
         for carpeta in hijos:
             if carpeta.get("mimeType") == MIME_FOLDER:
                 subruta = f"{ruta}/{carpeta['name']}" if ruta else carpeta["name"]

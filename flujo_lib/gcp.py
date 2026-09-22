@@ -33,17 +33,30 @@ def _heredados():
     return cargar_base_gcp, generar_base_rutas
 
 
-def escanear_lote(svc, destino_id: str, lote, destino_nombre: str) -> list[dict]:
-    """Devuelve filas desnormalizadas indexables del clon resuelto."""
+def escanear_lote(svc, destino_id: str, lote, destino_nombre: str, *, avance=None) -> list[dict]:
+    """
+    Devuelve filas desnormalizadas indexables del clon resuelto.
+
+    `avance` es un callable(hechos, total, mensaje) opcional: primero avisa que se
+    está escaneando (total desconocido) y luego avanza por cada registro que se
+    convierte en fila. Con `avance=None` no cambia nada.
+    """
     _, rutas = _heredados()
     meta = {"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp}
     escuela = getattr(lote, "escuela_gcp", "")
     if escuela:  # detectada en Drive; evita que quede vacía o adivinada en Cloud SQL
         meta["escuela"] = escuela
+    if avance is not None:
+        avance(0, 0, "Escaneando el clon")
     registros = rutas.escanear_ruta_drive(svc, destino_id, meta)
     ahora = datetime.now(timezone.utc).isoformat()
+    total = len(registros)
+    if avance is not None:
+        avance(0, total, f"{total} archivo(s) encontrados en el clon")
     filas = []
     for reg in registros:
+        if avance is not None:
+            avance(len(filas) + 1, total, str(reg.get("archivo_nombre") or ""))
         filas.append({
             "raiz_nombre": reg.get("raiz") or lote.raiz_gcp,
             "destinatario_codigo": reg.get("destinatario") or "MEN",
@@ -135,6 +148,7 @@ def cargar_lote(
     reemplazar: bool = True,
     conectar=conectar_desde_env,
     log=lambda _m: None,
+    avance=None,
 ) -> dict:
     """
     Carga un lote en una sola transacción, reemplazando lo que ya hubiera.
@@ -142,10 +156,22 @@ def cargar_lote(
     Con `reemplazar` (lo normal) se borran primero todas las filas de `archivo`
     de los programas del lote y luego se insertan las actuales. Si el escaneo no
     encontró nada, no se borra nada: nunca se vacía un programa por error.
+
+    `avance` es un callable(hechos, total, mensaje) opcional con total = len(filas)
+    que avanza por cada fila procesada. Con `avance=None` no cambia nada.
     """
     if not _SCHEMA_RE.fullmatch(schema or ""):
         raise ValueError(f"Esquema no válido: {schema}")
     programas = programas_de(filas)
+    hechos = 0
+
+    def avanzar(fila: dict) -> None:
+        """Una fila más procesada (insertada, ya existente o sin enlace)."""
+        nonlocal hechos
+        hechos += 1
+        if avance is not None:
+            avance(hechos, len(filas), str(fila.get("archivo_nombre") or ""))
+
     stats: dict = {
         "total": len(filas),
         "insertados": 0,
@@ -155,8 +181,12 @@ def cargar_lote(
         "programas": programas,
         "reemplazo": [],
     }
+    if avance is not None:
+        avance(0, len(filas), f"{len(filas)} archivo(s) por cargar")
     if simular:
         stats["simulados"] = len([f for f in filas if f.get("archivo_enlace")])
+        if avance is not None:
+            avance(len(filas), len(filas), "Simulación: no se escribió en la base")
         return stats
     carga, _ = _heredados()
     carga.SCHEMA = schema
@@ -177,9 +207,11 @@ def cargar_lote(
                 for fila in filas:
                     enlace = str(fila.get("archivo_enlace") or "").strip()
                     if not enlace:
+                        avanzar(fila)
                         continue
                     if carga.buscar_archivo_id(cur, enlace) is not None:
                         stats["existentes"] += 1
+                        avanzar(fila)
                         continue
                     escuela_id = carga.get_or_create(cur, "escuela", "nombre", fila["escuela_nombre"], cache)
                     programa_id = carga.get_or_create(cur, "programa", "nombre", fila["programa_nombre"], cache, extra={"escuela_id": escuela_id})
@@ -205,6 +237,7 @@ def cargar_lote(
                          str(fila.get("archivo_activo", "true")).lower() in {"true", "1", "t"}),
                     )
                     stats["insertados"] += 1
+                    avanzar(fila)
         return stats
     finally:
         conexion.close()

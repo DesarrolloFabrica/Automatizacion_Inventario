@@ -386,8 +386,9 @@ def _revisar_db(
 # Punto de entrada
 # ---------------------------------------------------------------------------
 def prevalidar(
-    excel: Path,
+    excel: Path | None = None,
     *,
+    lotes: list[Lote] | None = None,
     schema: str,
     simular: bool,
     interactivo: bool = True,
@@ -401,6 +402,7 @@ def prevalidar(
     Revisa Excel, token, carpetas de Drive, cliente, correos y base de datos, en ese orden,
     y devuelve todos los hallazgos juntos (nunca lanza por un problema esperado).
 
+    - lotes: si se pasan, se usan tal cual y no se lee ningún Excel (lo hace la web).
     - env: variables a usar; None -> cargar_env() y os.environ.
     - interactivo=False: si hace falta autorizar Google se reporta error en vez de pedir login.
     - simular: correo y base de datos pasan de error a aviso.
@@ -415,7 +417,12 @@ def prevalidar(
         cargar_env()
         env = os.environ
     res = ResultadoPrevalidacion()
-    _revisar_excel(res, Path(excel), log)
+    if lotes is None:
+        _revisar_excel(res, Path(excel), log)
+    else:
+        # La web arma el lote desde el formulario: no hay Excel que revisar.
+        res.lotes.extend(lotes)
+        res.agregar("ok", "excel", f"{len(lotes)} lote(s) por procesar.")
     _revisar_token(
         res,
         interactivo=interactivo,

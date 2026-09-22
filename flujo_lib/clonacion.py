@@ -117,6 +117,17 @@ class _Sesion:
     dormir: object
     resumen: ResumenClon
     nombres: dict = field(default_factory=dict)  # id -> nombre real (para el log)
+    avance: object = None  # callable(hechos, total, mensaje) o None
+    hechos: int = 0  # archivos del origen ya procesados (copiados, omitidos o fallidos)
+    total: int = 0  # archivos que tiene el origen (se cuentan solo si hay `avance`)
+
+    def informar(self, nombre: str, *, avanzar: bool = True) -> None:
+        """Avisa del avance (si alguien escucha). Solo la primera pasada suma."""
+        if self.avance is None:
+            return
+        if avanzar:
+            self.hechos += 1
+        self.avance(self.hechos, self.total, nombre)
 
     def registrar_copia(self, ruta: str) -> None:
         self.resumen.archivos_copiados += 1
@@ -339,11 +350,13 @@ def copiar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str =
                 s.log(f"  [archivo] {nombre} (ya existe, omito)")
                 s.resumen.archivos_omitidos += 1
                 visto[clave] += 1
+                s.informar(nombre)
                 continue
             _copiar_archivo_sin_duplicar(
                 s, item["id"], nombre, destino_parent_id, dest_archivos, _unir(ruta, nombre)
             )
             visto[clave] += 1
+            s.informar(nombre)
     _quitar_duplicados_en_carpeta(s, destino_parent_id, cupo_a, cupo_c, dest_carpetas, dest_archivos)
 
 
@@ -376,6 +389,8 @@ def igualar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str 
             s, item["id"], nombre, destino_parent_id, dest_archivos, _unir(ruta, nombre)
         )
         usados[clave] += 1
+        # La segunda pasada no suma: cada archivo del origen ya se contó en la primera.
+        s.informar(nombre, avanzar=False)
     _quitar_duplicados_en_carpeta(s, destino_parent_id, cupo_a, cupo_c, dest_carpetas, dest_archivos)
     for item in origen_hijos:
         if item.get("mimeType") != MIME_FOLDER:
@@ -392,6 +407,17 @@ def igualar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str 
         igualar_arbol(s, item["id"], ex_id, _unir(ruta, nombre))
 
 
+def _contar_archivos(s: _Sesion, carpeta_id: str) -> int:
+    """Cuántos archivos (no carpetas) cuelgan de esa carpeta, a cualquier profundidad."""
+    total = 0
+    for hijo in s.listar(s.svc, carpeta_id):
+        if hijo.get("mimeType") == MIME_FOLDER:
+            total += _contar_archivos(s, hijo["id"])
+        else:
+            total += 1
+    return total
+
+
 def clonar_arbol(
     svc,
     origen_id: str,
@@ -401,6 +427,7 @@ def clonar_arbol(
     listar=drive.listar_hijos,
     ejecutar=drive.ejecutar,
     dormir=time.sleep,
+    avance=None,
 ) -> ResumenClon:
     """
     Clona (o resincroniza) el contenido de origen_id dentro de destino_id.
@@ -411,14 +438,29 @@ def clonar_arbol(
     pruebas no esperan de verdad). Devuelve ResumenClon; no lanza por archivos
     que no se pudieron copiar (quedan en `fallidos`), sí por errores de Drive al
     listar o crear carpetas (400/401/403/404 o red agotada).
+
+    `avance` es un callable(hechos, total, mensaje) opcional para pintar una barra:
+    antes de copiar se recorre el origen una vez para saber cuántos archivos hay y
+    se avisa (0, total, …); después se avisa por cada archivo copiado, omitido o
+    fallido, con su nombre. Con `avance=None` (lo de siempre) no se cuenta nada ni
+    cambia el comportamiento.
     """
     if ejecutar is drive.ejecutar:
         ejecutar = functools.partial(drive.ejecutar, dormir=dormir)
     if listar is drive.listar_hijos:
         listar = functools.partial(drive.listar_hijos, ejecutar=ejecutar)
     s = _Sesion(
-        svc=svc, log=log, listar=listar, ejecutar=ejecutar, dormir=dormir, resumen=ResumenClon()
+        svc=svc,
+        log=log,
+        listar=listar,
+        ejecutar=ejecutar,
+        dormir=dormir,
+        resumen=ResumenClon(),
+        avance=avance,
     )
+    if avance is not None:
+        s.total = _contar_archivos(s, origen_id)
+        avance(0, s.total, f"{s.total} archivo(s) por clonar")
     copiar_arbol(s, origen_id, destino_id)
     s.log("Igualando con el origen (huecos y duplicados)…")
     igualar_arbol(s, origen_id, destino_id)

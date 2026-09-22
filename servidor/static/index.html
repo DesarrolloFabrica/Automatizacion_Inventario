@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clonación e inventario — Fábrica de contenido</title>
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+  <a class="salto-contenido" href="#contenido">Saltar al contenido</a>
+
+  <header class="cabecera">
+    <div class="cabecera__marca">
+      <h1 class="cabecera__titulo">Clonación e inventario</h1>
+      <p class="cabecera__sub">Fábrica de contenido · CUN</p>
+    </div>
+    <div class="salud" id="salud" aria-live="polite">
+      <span class="salud__dato" id="salud-cuenta">Cuenta: comprobando…</span>
+      <span class="salud__dato" id="salud-esquema">Esquema: comprobando…</span>
+    </div>
+  </header>
+
+  <main id="contenido" class="contenido">
+
+    <!-- ================= PANTALLA 1: lanzar una corrida ================= -->
+    <section id="vista-formulario" class="vista" aria-labelledby="titulo-formulario">
+
+      <div class="tarjeta">
+        <h2 id="titulo-formulario" class="tarjeta__titulo">Lanzar una corrida</h2>
+
+        <form id="formulario" novalidate>
+
+          <div class="campo">
+            <label class="campo__etiqueta" for="campo-origen">Carpeta de origen</label>
+            <p class="campo__nota" id="nota-origen">
+              Enlace de la carpeta de Google Drive que se va a copiar. No se modifica nada dentro de ella.
+            </p>
+            <input
+              class="campo__entrada"
+              id="campo-origen"
+              name="origen"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://drive.google.com/drive/folders/1Ab…"
+              aria-describedby="nota-origen error-origen"
+              required>
+            <p class="campo__error" id="error-origen" role="alert" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label class="campo__etiqueta" for="campo-destino">Carpeta de destino</label>
+            <p class="campo__nota" id="nota-destino">
+              Enlace de la carpeta <strong>contenedora</strong>. Dentro de ella se creará automáticamente
+              una carpeta con el mismo nombre que la de origen, y la copia se hará ahí.
+            </p>
+            <input
+              class="campo__entrada"
+              id="campo-destino"
+              name="destino"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://drive.google.com/drive/folders/1Zx…"
+              aria-describedby="nota-destino error-destino"
+              required>
+            <p class="campo__error" id="error-destino" role="alert" hidden></p>
+          </div>
+
+          <div class="campo">
+            <label class="campo__etiqueta" for="campo-etiqueta">
+              Nombre del lote <span class="campo__opcional">(opcional)</span>
+            </label>
+            <p class="campo__nota" id="nota-etiqueta">
+              Sirve para reconocer esta corrida más adelante en la lista.
+            </p>
+            <input
+              class="campo__entrada"
+              id="campo-etiqueta"
+              name="etiqueta"
+              type="text"
+              autocomplete="off"
+              maxlength="120"
+              placeholder="Por ejemplo: Psicología · módulo 3"
+              aria-describedby="nota-etiqueta">
+          </div>
+
+          <div class="campo">
+            <label class="campo__etiqueta" for="campo-cliente">Cliente</label>
+            <p class="campo__nota" id="nota-cliente">
+              Normalmente no hace falta tocarlo: se deduce de dónde está la carpeta en Drive.
+            </p>
+            <select class="campo__entrada campo__entrada--select" id="campo-cliente" name="cliente"
+                    aria-describedby="nota-cliente">
+              <option value="">(Detectar automáticamente)</option>
+              <option value="PRODUCTO">PRODUCTO</option>
+              <option value="TANIA">TANIA</option>
+              <option value="LMS_correcciones">LMS_correcciones</option>
+            </select>
+          </div>
+
+          <div class="campo campo--casilla">
+            <input type="checkbox" id="campo-simular" name="simular" checked>
+            <label for="campo-simular">
+              Modo prueba: no escribe en la base de datos ni envía correo
+            </label>
+          </div>
+
+          <details class="avanzado">
+            <summary class="avanzado__resumen">Opciones avanzadas</summary>
+            <div class="campo campo--casilla">
+              <input type="checkbox" id="campo-forzar" name="forzar_carga">
+              <label for="campo-forzar">
+                Cargar a la base aunque la verificación encuentre diferencias
+              </label>
+            </div>
+            <p class="campo__nota">
+              Déjalo sin marcar salvo que alguien del equipo te lo pida: por defecto los lotes
+              con diferencias se retienen y no se cargan.
+            </p>
+          </details>
+
+          <!-- tabindex -1: al rechazar el servidor, el foco salta aquí para que
+               el mensaje se lea también con teclado o lector de pantalla -->
+          <p class="formulario__error" id="error-envio" role="alert" tabindex="-1" hidden></p>
+
+          <button class="boton boton--principal" id="boton-ejecutar" type="submit">Ejecutar</button>
+
+        </form>
+      </div>
+
+      <div class="tarjeta" id="tarjeta-historial" hidden>
+        <h2 class="tarjeta__titulo">Últimas corridas</h2>
+        <ul class="historial" id="historial"></ul>
+      </div>
+
+    </section>
+
+    <!-- ================= PANTALLA 2: avance en vivo ================= -->
+    <section id="vista-avance" class="vista" aria-labelledby="titulo-avance" hidden>
+
+      <div class="tarjeta">
+        <div class="avance__cabecera">
+          <div class="avance__identidad">
+            <h2 id="titulo-avance" class="tarjeta__titulo tarjeta__titulo--pegado">
+              <span id="avance-etiqueta">Corrida</span>
+            </h2>
+            <p class="avance__meta">
+              <span id="avance-inicio"></span>
+              <span class="avance__sep" aria-hidden="true">·</span>
+              <span id="avance-id" class="avance__id"></span>
+            </p>
+          </div>
+          <div class="avance__acciones">
+            <span class="distintivo" id="avance-distintivo">En curso</span>
+            <button class="boton boton--secundario" id="boton-cancelar" type="button">Cancelar</button>
+            <button class="boton boton--secundario" id="boton-nueva" type="button" hidden>Nueva corrida</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aviso de conexión: aparece sin borrar nada de lo ya mostrado -->
+      <p class="aviso-conexion" id="aviso-conexion" role="status" hidden>
+        Se perdió la conexión con el servidor, reintentando…
+      </p>
+
+      <!-- Hallazgos de la prevalidación -->
+      <div class="tarjeta" id="tarjeta-prevalidacion" hidden>
+        <h3 class="tarjeta__titulo tarjeta__titulo--menor">Antes de empezar</h3>
+        <ul class="hallazgos" id="prevalidacion"></ul>
+      </div>
+
+      <!-- Resumen final -->
+      <div class="tarjeta" id="tarjeta-resumen" hidden>
+        <h3 class="tarjeta__titulo tarjeta__titulo--menor">Resultado</h3>
+        <div id="resumen"></div>
+        <ul class="enlaces" id="enlaces"></ul>
+      </div>
+
+      <!-- Pasos, agrupados por lote -->
+      <div id="lotes" class="lotes" aria-live="polite"></div>
+
+      <div class="tarjeta">
+        <div class="consola__cabecera">
+          <h3 class="tarjeta__titulo tarjeta__titulo--menor" id="titulo-mensajes">Mensajes recientes</h3>
+          <button class="boton boton--enlace" id="boton-bajar" type="button" hidden>Ir al final</button>
+        </div>
+        <div class="consola" id="mensajes" tabindex="0" role="log" aria-labelledby="titulo-mensajes"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="pie">
+    <span id="pie-modo"></span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

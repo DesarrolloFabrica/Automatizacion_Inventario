@@ -59,6 +59,7 @@ from flujo_lib.inventario import generar_inventario, publicar_inventario  # noqa
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion  # noqa: E402
 from flujo_lib.notificar import construir_mensaje, enviar_correo  # noqa: E402
 from flujo_lib.prevalidacion import ResultadoPrevalidacion, correos_aviso, prevalidar  # noqa: E402
+from flujo_lib.progreso import Reporte  # noqa: E402
 from flujo_lib.verificacion import verificar_lote  # noqa: E402
 
 SCHEMA_PRODUCCION = "fabrica"
@@ -67,6 +68,7 @@ SCHEMA_PRODUCCION = "fabrica"
 SCHEMA_DEFECTO = "fabrica_pruebas"
 PASOS_REHACER = PASOS + ("todo",)
 NOTA_OMITIDO = "No se ejecutó porque falló el paso anterior"
+NOTA_CANCELADO = "No se ejecutó: la corrida se canceló"
 NOTA_FASES = "Run único completado: Drive, verificación, inventario, Cloud SQL y notificación."
 ACCION_REINTENTAR_COPIA = (
     "Vuelve a ejecutar; solo se copiará lo que falta. "
@@ -364,7 +366,8 @@ def resolver_paso_destino(
 
 
 def clonar_lote(
-    estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino_nombre: str, rehacer: set[str]
+    estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino_nombre: str,
+    rehacer: set[str], reporte=None,
 ) -> bool:
     """Paso "clonacion": copia el origen dentro de la carpeta destino. True si quedó completo."""
     clave = lote.clave
@@ -379,7 +382,10 @@ def clonar_lote(
     logging.info("Lote «%s»: clonando el origen dentro de «%s»...", lote.etiqueta, destino_nombre)
     estado.marcar(clave, "clonacion", "en_curso", detalle=f"Clonando en «{destino_nombre}» ({destino_id})")
     try:
-        resumen = clonar_arbol(svc, lote.origen_id, destino_id, log=logging.info)
+        resumen = clonar_arbol(
+            svc, lote.origen_id, destino_id, log=logging.info,
+            avance=_avance_de(reporte, lote, "clonacion"),
+        )
     except Exception as e:
         err = traducir_excepcion(e, paso="clonacion", contexto=f"el lote «{lote.etiqueta}»")
         _fallar_paso(estado, lote, "clonacion", err)
@@ -399,14 +405,17 @@ def clonar_lote(
     return True
 
 
-def convertir_lote(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str]) -> bool:
+def convertir_lote(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str], reporte=None) -> bool:
     clave = lote.clave
     if estado.completado(clave, "formato") and "formato" not in rehacer:
         logging.info("Lote «%s»: formato ya completado en una corrida anterior.", lote.etiqueta)
         return True
     estado.marcar(clave, "formato", "en_curso", detalle="Convirtiendo JPG/JPEG a PNG en el clon")
     try:
-        resumen = convertir_arbol(svc, destino_id, log=logging.info)
+        resumen = convertir_arbol(
+            svc, destino_id, log=logging.info,
+            avance=_avance_de(reporte, lote, "formato"),
+        )
     except Exception as e:
         _fallar_paso(estado, lote, "formato", traducir_excepcion(e, paso="formato", contexto=f"el lote «{lote.etiqueta}»"))
         return False
@@ -421,6 +430,16 @@ def convertir_lote(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
     return True
 
 
+def _avance_de(reporte, lote: Lote, paso: str):
+    """
+    Puente entre los pasos y el reporte de avance del frontend.
+    Sin reporte devuelve None y los pasos se comportan exactamente como siempre.
+    """
+    if reporte is None:
+        return None
+    return lambda hechos, total, mensaje="": reporte.fijar(lote.clave, paso, hechos, total, mensaje)
+
+
 def _meta_gcp(lote: Lote) -> dict[str, str]:
     """Cliente, raíz y escuela del lote tal como se guardan en Cloud SQL."""
     meta = {"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp}
@@ -429,7 +448,7 @@ def _meta_gcp(lote: Lote) -> dict[str, str]:
     return meta
 
 
-def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str]) -> bool:
+def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str], reporte=None) -> bool:
     clave = lote.clave
     if estado.completado(clave, "verificacion") and "verificacion" not in rehacer:
         return True
@@ -438,6 +457,7 @@ def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
             svc, lote.origen_id, destino_id,
             programa=estado.destino_de(clave)[1] or lote.etiqueta,
             meta=_meta_gcp(lote),
+            avance=_avance_de(reporte, lote, "verificacion"),
         )
     except Exception as e:
         _fallar_paso(
@@ -454,15 +474,21 @@ def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
     return True
 
 
-def cargar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino_nombre: str, *, schema: str, simular: bool, rehacer: set[str]) -> bool:
+def cargar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino_nombre: str, *, schema: str, simular: bool, rehacer: set[str], reporte=None) -> bool:
     clave = lote.clave
     if estado.completado(clave, "carga") and "carga" not in rehacer:
         logging.info("Lote «%s»: carga ya completada en una corrida anterior.", lote.etiqueta)
         return True
     estado.marcar(clave, "carga", "en_curso", detalle="Preparando archivos indexables")
     try:
-        filas = escanear_lote(svc, destino_id, lote, destino_nombre)
-        stats = cargar_lote(filas, schema=schema, simular=simular, log=logging.info)
+        filas = escanear_lote(
+            svc, destino_id, lote, destino_nombre,
+            avance=_avance_de(reporte, lote, "carga"),
+        )
+        stats = cargar_lote(
+            filas, schema=schema, simular=simular, log=logging.info,
+            avance=_avance_de(reporte, lote, "carga"),
+        )
     except Exception as e:
         _fallar_paso(estado, lote, "carga", traducir_excepcion(e, paso="carga", contexto=f"el lote «{lote.etiqueta}»"))
         return False
@@ -484,25 +510,50 @@ def cargar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino
 def procesar_lote(
     estado: EstadoCorrida, svc, lote: Lote, carpetas: dict[str, dict], rehacer: set[str],
     forzar_carga: bool = False, schema: str = SCHEMA_DEFECTO, simular: bool = False,
+    reporte=None, cancelado=None,
 ) -> bool:
-    """Destino → clonación → formato → verificación → compuerta."""
+    """
+    Destino → clonación → formato → verificación → compuerta.
+
+    `cancelado` es un callable que dice si alguien pidió parar. Se mira entre
+    pasos, no dentro de ellos: un paso en marcha termina lo que está haciendo
+    (parar una copia a medias dejaría Drive en un estado raro) y no se empieza
+    el siguiente. Lo hecho queda en el estado, así que se puede retomar.
+    """
+    def _parar() -> bool:
+        if not (cancelado and cancelado()):
+            return False
+        for paso in PASOS:
+            if estado.paso(lote.clave, paso).get("estado") in {"pendiente", "en_curso"}:
+                estado.marcar(lote.clave, paso, "omitido", detalle=NOTA_CANCELADO)
+        logging.warning("Lote «%s»: cancelado a petición de quien lanzó la corrida.", lote.etiqueta)
+        return True
+
     estado.registrar_lote(lote)
     logging.info("=" * 60)
     logging.info("Lote «%s» (fila %s, cliente %s)", lote.etiqueta, lote.fila, lote.cliente_excel)
     destino = resolver_paso_destino(estado, svc, lote, carpetas, rehacer)
     if destino is None:
         return False
-    if not clonar_lote(estado, svc, lote, destino[0], destino[1], rehacer):
+    if _parar():
         return False
-    if not convertir_lote(estado, svc, lote, destino[0], rehacer):
+    if not clonar_lote(estado, svc, lote, destino[0], destino[1], rehacer, reporte):
         return False
-    verificado = verificar_paso(estado, svc, lote, destino[0], rehacer)
+    if _parar():
+        return False
+    if not convertir_lote(estado, svc, lote, destino[0], rehacer, reporte):
+        return False
+    if _parar():
+        return False
+    verificado = verificar_paso(estado, svc, lote, destino[0], rehacer, reporte)
     if not verificado and not forzar_carga:
         estado.marcar(lote.clave, "carga", "omitido", detalle="Retenido por la compuerta: la verificación encontró diferencias")
         return False
+    if _parar():
+        return False
     return cargar_paso(
         estado, svc, lote, destino[0], destino[1], schema=schema,
-        simular=simular, rehacer=rehacer,
+        simular=simular, rehacer=rehacer, reporte=reporte,
     ) and verificado
 
 
@@ -516,7 +567,11 @@ def _cerrar_sin_fallar(estado: EstadoCorrida, resultado: str) -> None:
         logging.debug("No se pudo cerrar la corrida en el estado: %r", e)
 
 
-def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrida, ruta_log: Path) -> int:
+def ejecutar_corrida(
+    args: argparse.Namespace, excel: Path, estado: EstadoCorrida, ruta_log: Path,
+    *, lotes: list[Lote] | None = None, reporte=None, cargar_credenciales=None,
+    cancelado=None,
+) -> int:
     """Prevalidación → lotes → cierre. Devuelve el código de salida."""
     rehacer = pasos_efectivos_a_rehacer(args.rehacer)
     # Antes de la primera llamada a Google: reconocer los certificados del
@@ -537,14 +592,22 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
         # drive.* se toma aquí (no como default) para poder sustituirlo en pruebas.
         res = prevalidar(
             excel,
+            lotes=lotes,
             schema=args.schema,
             simular=args.simular,
             interactivo=not args.no_interactivo,
-            cargar_credenciales=drive.cargar_credenciales,
+            cargar_credenciales=cargar_credenciales or drive.cargar_credenciales,
             construir_servicio=drive.construir_servicio,
             log=logging.info,
         )
         imprimir_hallazgos(res)
+        # Se guardan en el estado para que la web pueda mostrarlos y para dejar
+        # constancia de con qué condiciones arrancó la corrida.
+        estado.datos["prevalidacion"] = [
+            {"nivel": h.nivel, "area": h.area, "mensaje": h.mensaje, "accion": h.accion}
+            for h in res.hallazgos
+        ]
+        estado.guardar()
         if not res.ok:
             estado.cerrar_corrida("fallido_prevalidacion")
             ruta_xlsx = exportar_estado(estado)
@@ -574,7 +637,7 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
         logging.info("Prevalidación correcta. Procesando %d lote(s)...", len(res.lotes))
         exitos = sum(1 for lote in res.lotes if procesar_lote(
             estado, res.svc, lote, res.carpetas, rehacer, args.forzar_carga,
-            args.schema, args.simular,
+            args.schema, args.simular, reporte, cancelado,
         ))
         trabajos = []
         for lote in res.lotes:

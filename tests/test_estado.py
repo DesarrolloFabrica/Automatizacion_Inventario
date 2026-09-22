@@ -19,6 +19,7 @@ from flujo_lib.estado import (
     EstadoCorrida,
 )
 from flujo_lib.mensajes import ErrorFlujo
+from flujo_lib.progreso import Avance
 
 
 class Reloj:
@@ -162,7 +163,14 @@ class TestLotes(Base):
         for p in PASOS:
             self.assertEqual(
                 registro["pasos"][p],
-                {"estado": "pendiente", "fecha": None, "detalle": "", "motivo": "", "accion": ""},
+                {
+                    "estado": "pendiente",
+                    "fecha": None,
+                    "detalle": "",
+                    "motivo": "",
+                    "accion": "",
+                    "progreso": {"hechos": 0, "total": 0, "mensaje": "", "porcentaje": 0},
+                },
             )
 
     def test_registrar_lote_existente_conserva_pasos(self):
@@ -302,6 +310,146 @@ class TestGuardar(Base):
         self.assertEqual(self._leer_json()["creado"], "2026-09-22T08:00:00")
 
 
+class TestAvanzar(Base):
+    """
+    El progreso se llama cientos de veces por corrida: se guarda en memoria
+    siempre, pero en disco como mucho cada 2 segundos (reloj inyectado) y sin
+    falta al completarse el paso.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lote = _lote()
+        self.estado.registrar_lote(self.lote)
+        self.clave = self.lote.clave
+
+    def _progreso_json(self, paso: str = "clonacion") -> dict:
+        return self._leer_json()["lotes"][self.clave]["pasos"][paso]["progreso"]
+
+    def test_guarda_el_progreso_en_memoria_siempre(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(3, 12, "foto.png"))
+        self.assertEqual(
+            self.estado.progreso(self.clave, "clonacion"),
+            {"hechos": 3, "total": 12, "mensaje": "foto.png", "porcentaje": 25},
+        )
+        self.assertEqual(self.estado.paso(self.clave, "clonacion")["progreso"]["hechos"], 3)
+
+    def test_acepta_dict_y_objeto_suelto(self):
+        self.estado.avanzar(self.clave, "carga", {"hechos": 1, "total": 4, "mensaje": "fila"})
+        self.assertEqual(self.estado.progreso(self.clave, "carga")["porcentaje"], 25)
+        self.estado.avanzar(self.clave, "carga", SimpleNamespace(hechos=2, total=4, mensaje="fila"))
+        self.assertEqual(self.estado.progreso(self.clave, "carga")["porcentaje"], 50)
+
+    def test_no_escribe_mas_de_una_vez_cada_dos_segundos(self):
+        for i in range(1, 101):  # cien archivos copiados en el mismo segundo
+            self.estado.avanzar(self.clave, "clonacion", Avance(i, 1000, f"archivo_{i}"))
+        self.assertEqual(self._progreso_json()["hechos"], 0)  # nada de eso llegó al disco
+
+        self.reloj.avanzar(2)
+        self.estado.avanzar(self.clave, "clonacion", Avance(101, 1000, "archivo_101"))
+        self.assertEqual(self._progreso_json()["hechos"], 101)
+
+        self.estado.avanzar(self.clave, "clonacion", Avance(102, 1000, "archivo_102"))
+        self.assertEqual(self._progreso_json()["hechos"], 101)  # vuelve a frenar
+
+    def test_siempre_escribe_al_completarse_el_paso(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(999, 1000, "casi"))
+        self.assertEqual(self._progreso_json()["hechos"], 0)
+        self.estado.avanzar(self.clave, "clonacion", Avance(1000, 1000, "último"))
+        self.assertEqual(
+            self._progreso_json(),
+            {"hechos": 1000, "total": 1000, "mensaje": "último", "porcentaje": 100},
+        )
+
+    def test_forzar_guardado_escribe_lo_pendiente(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(5, 1000, "archivo_5"))
+        self.assertEqual(self._progreso_json()["hechos"], 0)
+        self.estado.forzar_guardado()
+        self.assertEqual(self._progreso_json()["hechos"], 5)
+
+    def test_forzar_guardado_sin_pendientes_no_reescribe(self):
+        self.reloj.avanzar(60)
+        self.estado.forzar_guardado()
+        self.assertEqual(self._leer_json()["actualizado"], "2026-09-22T08:00:00")
+
+    def test_marcar_no_pierde_el_progreso_y_lo_escribe(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(7, 1000, "archivo_7"))
+        self.estado.marcar(self.clave, "clonacion", "en_curso", detalle="copiando")
+        self.assertEqual(self._progreso_json()["hechos"], 7)
+        self.assertEqual(self._leer_json()["lotes"][self.clave]["pasos"]["clonacion"]["estado"], "en_curso")
+
+    def test_paso_invalido_y_lote_desconocido(self):
+        with self.assertRaises(ValueError):
+            self.estado.avanzar(self.clave, "correo", Avance(1, 2))
+        with self.assertRaises(ValueError):
+            self.estado.progreso(self.clave, "correo")
+        with self.assertRaises(KeyError):
+            self.estado.avanzar("no|existe", "clonacion", Avance(1, 2))
+
+    def test_progreso_devuelve_copia(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(1, 2, "x"))
+        copia = self.estado.progreso(self.clave, "clonacion")
+        copia["hechos"] = 99
+        self.assertEqual(self.estado.progreso(self.clave, "clonacion")["hechos"], 1)
+
+
+class TestEstadoViejoSinProgreso(Base):
+    """Un JSON escrito antes de que existiera el progreso se sigue leyendo igual."""
+
+    def setUp(self):
+        super().setUp()
+        self.clave = "ORIG1|RAIZ1"
+        viejo = {
+            "version": 1,
+            "excel": str(self.excel),
+            "creado": "2026-01-01T00:00:00",
+            "actualizado": "2026-01-01T00:00:00",
+            "corridas": [],
+            "lotes": {
+                self.clave: {
+                    "etiqueta": "Lote viejo",
+                    "fila": 2,
+                    "cliente": "PRODUCTO",
+                    "origen_id": "ORIG1",
+                    "destino_raiz_id": "RAIZ1",
+                    "destino_id": "DEST1",
+                    "destino_nombre": "Carpeta",
+                    "pasos": {
+                        p: {"estado": "ok", "fecha": "2026-01-01T00:00:00", "detalle": "", "motivo": "", "accion": ""}
+                        for p in PASOS
+                    },
+                    "ultimo_error": None,
+                }
+            },
+        }
+        self.estado.ruta_json.write_text(json.dumps(viejo, ensure_ascii=False), encoding="utf-8")
+        self.estado = EstadoCorrida.abrir(self.excel, self.dir, ahora=self.reloj)
+
+    def test_se_lee_sin_romper(self):
+        self.assertTrue(self.estado.completado(self.clave, "clonacion"))
+        self.assertEqual(
+            self.estado.progreso(self.clave, "clonacion"),
+            {"hechos": 0, "total": 0, "mensaje": "", "porcentaje": 0},
+        )
+        self.assertEqual(self.estado.paso(self.clave, "clonacion")["progreso"]["porcentaje"], 0)
+        self.assertEqual(self.estado.resumen()[0]["progreso"]["clonacion"]["hechos"], 0)
+
+    def test_exportar_excel_sigue_funcionando(self):
+        self.assertTrue(self.estado.exportar_excel().is_file())
+
+    def test_se_le_puede_poner_progreso(self):
+        self.estado.avanzar(self.clave, "clonacion", Avance(2, 2, "fin"))
+        self.assertEqual(self.estado.progreso(self.clave, "clonacion")["porcentaje"], 100)
+        datos = json.loads(self.estado.ruta_json.read_text(encoding="utf-8"))
+        self.assertEqual(datos["lotes"][self.clave]["pasos"]["clonacion"]["progreso"]["hechos"], 2)
+
+    def test_registrar_lote_le_agrega_la_clave(self):
+        self.estado.registrar_lote(_lote(fila=2, etiqueta="Lote viejo"))
+        pasos = self.estado.datos["lotes"][self.clave]["pasos"]
+        self.assertEqual(pasos["clonacion"]["progreso"], {"hechos": 0, "total": 0, "mensaje": "", "porcentaje": 0})
+        self.assertEqual(pasos["clonacion"]["estado"], "ok")  # no se pisa lo que ya había
+
+
 class TestResumen(Base):
     def test_ordenado_por_fila(self):
         c = _lote(fila=12, etiqueta="C", origen="O3", raiz="R")
@@ -328,6 +476,18 @@ class TestResumen(Base):
         self.assertEqual(fila_a["actualizado"], "2026-09-22T08:00:00")
         self.assertIsNone(resumen[1]["ultimo_error"])
         self.assertIsNone(resumen[1]["actualizado"])
+
+    def test_incluye_el_progreso_de_cada_paso(self):
+        lote = _lote(fila=1, etiqueta="A", origen="O1", raiz="R")
+        self.estado.registrar_lote(lote)
+        self.estado.avanzar(lote.clave, "clonacion", Avance(3, 4, "tercero.pdf"))
+        progreso = self.estado.resumen()[0]["progreso"]
+        self.assertEqual(sorted(progreso), sorted(PASOS))
+        self.assertEqual(
+            progreso["clonacion"],
+            {"hechos": 3, "total": 4, "mensaje": "tercero.pdf", "porcentaje": 75},
+        )
+        self.assertEqual(progreso["carga"], {"hechos": 0, "total": 0, "mensaje": "", "porcentaje": 0})
 
     def test_vacio(self):
         self.assertEqual(self.estado.resumen(), [])

@@ -1,0 +1,71 @@
+# =============================================================================
+# .dockerignore — que NO entra en la imagen del servicio
+#
+# Todo lo que aparezca aqui se queda fuera del contexto que se envia a Cloud
+# Build, asi que ni siquiera viaja a Google. Dos motivos:
+#   1) SEGURIDAD: los secretos no se hornean en la imagen. En el servicio las
+#      credenciales llegan de Secret Manager, montadas como archivo o leidas
+#      desde el codigo (ver despliegue/README.md).
+#   2) TAMANO: menos contexto = build mas rapido y imagen mas pequena.
+# =============================================================================
+
+# --- Secretos (NUNCA dentro de la imagen) -----------------------------------
+.env
+**/.env
+.env.*
+!.env.example
+token.json
+**/token.json
+credentials.json
+**/credentials.json
+credenciales.json
+**/credenciales.json
+*.pem
+certificados_confianza.pem
+**/certificados_confianza.pem
+clave*.json
+*-sa.json
+
+# --- Datos de trabajo y resultados de corridas ------------------------------
+# El Excel de rutas lo sube la persona desde la web; el estado vive en el bucket.
+corridas/
+**/corridas/
+RUTAS.xlsx
+**/RUTAS.xlsx
+*.xlsx
+*.csv
+*.log
+hoja_inventario_id.txt
+**/hoja_inventario_id.txt
+
+# --- Control de versiones y herramientas ------------------------------------
+.git
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# --- Python local -----------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# --- Codigo que el servicio no ejecuta --------------------------------------
+# Las pruebas usan un Drive falso y no se ejecutan en produccion.
+tests/
+# Alternativa en Apps Script y conversion por linea de comandos: flujo_lib no
+# importa nada de CAMBIAR_FORMATO (la conversion la hace flujo_lib/formato.py).
+CAMBIAR_FORMATO/
+# Scripts y guias de despliegue: se usan desde el equipo, no dentro de la imagen.
+despliegue/
+*.md
+!servidor/**/*.md
+
+# --- Sistema operativo ------------------------------------------------------
+.DS_Store
+Thumbs.db

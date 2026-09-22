@@ -24,6 +24,28 @@ RAÍZ
 
 
 ==================================================
+servidor/  (servicio web: página + API)
+==================================================
+
+  app.py                     Aplicación FastAPI: API y página estática
+  corridas.py                Cola de corridas, ejecución en hilo y avance
+  configuracion.py           Variables de entorno y credenciales del servicio
+  static/index.html          Formulario y pantalla de avance
+  static/estilos.css         Estilos
+  static/app.js              Lógica de la página (sondeo del avance)
+
+
+==================================================
+despliegue/  (Google Cloud Run)
+==================================================
+
+  README.md                  Guía paso a paso del despliegue
+  ARQUITECTURA.md            Cómo encaja todo y limitaciones conocidas
+  variables.env.example      Plantilla de variables del servicio
+  desplegar.ps1              Script de despliegue con comprobaciones
+
+
+==================================================
 flujo_lib/  (librería compartida del run único)
 ==================================================
 
@@ -42,7 +64,9 @@ flujo_lib/  (librería compartida del run único)
                              clone_carpeta_drive.py con nombre canónico)
   estado.py                  Estado por lote en corridas/<excel>.estado.json y
                              exportación a Excel
-  prevalidacion.py           Revisión previa: Excel, token, Drive, correos, base de datos
+  prevalidacion.py           Revisión previa: Excel, token, Drive, cliente, correos, base
+  progreso.py                Avance paso a paso para la barra de la web
+  almacen.py                 Estado en disco o en Cloud Storage
   formato.py                 Conversión JPG/JPEG → PNG en el clon
   verificacion.py            Completitud, integridad, ubicación e indexabilidad
   inventario.py              Inventario Excel y publicación en Sheets

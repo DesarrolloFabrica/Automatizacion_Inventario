@@ -28,14 +28,16 @@ Convenciones del paquete:
 | `nombres.py` | Nombre canónico de archivos (ver abajo): `extension`, `base`, `es_jpg`, `nombre_png`, `nombre_canonico`. Solo texto. | `nombre_canonico` |
 | `excel.py` | `leer_lotes(ruta) -> list[Lote]` con openpyxl: cabecera flexible, alias de columnas, `cliente` obligatorio, enlaces validados, origen distinto de destino, pares únicos. Acumula todos los problemas y lanza **una** `ExcelInvalido`. `resolver_excel`, `normalizar_clasificacion`, `CLASIFICACIONES`. | `leer_lotes`, `resolver_excel`, `Lote` |
 | `destino.py` | `resolver_destino(svc, origen, raiz)`: dentro de la raíz `destino` del Excel crea o reutiliza la carpeta con el nombre exacto del origen; si la raíz ya se llama como el origen la usa directamente (`directa=True`). Nunca borra nada; si hay repetidas usa la primera y avisa. `describir(res)` para el log. | `resolver_destino`, `DestinoResuelto`, `describir` |
-| `clonacion.py` | `clonar_arbol(svc, origen_id, destino_id, *, log, ...) -> ResumenClon`: port fiel de `copiar_arbol` / `igualar_arbol` de `clone_carpeta_drive.py` (dos pasadas, reintentos, limpieza de duplicados) comparando archivos por nombre canónico. Nunca escribe bajo el origen. `ResumenClon.ok()` y `.texto()`. | `clonar_arbol`, `ResumenClon` |
-| `formato.py` | Conversión recursiva e idempotente JPG/JPEG → PNG en el clon. | `convertir_arbol`, `ResumenFormato` |
-| `verificacion.py` | Completitud, integridad, ubicación e indexabilidad del clon. | `verificar_lote`, `ResultadoVerificacion` |
+| `clonacion.py` | `clonar_arbol(svc, origen_id, destino_id, *, log, ...) -> ResumenClon`: port fiel de `copiar_arbol` / `igualar_arbol` de `clone_carpeta_drive.py` (dos pasadas, reintentos, limpieza de duplicados) comparando archivos por nombre canónico. Nunca escribe bajo el origen. `ResumenClon.ok()` y `.texto()`. Con `avance=callable(hechos, total, mensaje)` cuenta antes los archivos del origen y avisa por cada uno copiado, omitido o fallido. | `clonar_arbol`, `ResumenClon` |
+| `formato.py` | Conversión recursiva e idempotente JPG/JPEG → PNG en el clon. `avance` opcional (total = JPG/JPEG que había). | `convertir_arbol`, `ResumenFormato` |
+| `verificacion.py` | Completitud, integridad, ubicación e indexabilidad del clon. `avance` opcional por fases (total = 3). | `verificar_lote`, `ResultadoVerificacion` |
 | `inventario.py` | Adaptación canónica del reporte Excel y publicación en Sheets heredados. | `generar_inventario`, `publicar_inventario` |
-| `gcp.py` | Escaneo del clon y carga a Cloud SQL, una transacción por lote y anti-duplicados por enlace. | `escanear_lote`, `cargar_lote` |
+| `gcp.py` | Escaneo del clon y carga a Cloud SQL, una transacción por lote y anti-duplicados por enlace. `avance` opcional en ambas (en `cargar_lote`, total = filas). | `escanear_lote`, `cargar_lote` |
 | `notificar.py` | Correo único con tabla por lote, consultas SQL y Excel de estado adjunto. | `construir_mensaje`, `enviar_correo` |
-| `estado.py` | `EstadoCorrida.abrir(excel)` abre o crea `corridas/<excel>.estado.json`. Por lote (clave `origen_id|destino_raiz_id`) guarda el estado de cada paso (`PASOS`: destino, clonacion, formato, verificacion, carga; `ESTADOS`: pendiente, en_curso, ok, con_diferencias, fallido, omitido), la carpeta destino real y el último error. `iniciar_corrida` / `cerrar_corrida`, `registrar_lote`, `marcar`, `completado`, `resumen`, `exportar_excel` (hojas "Estado" y "Corridas", colores por paso). Escritura atómica. | `EstadoCorrida` |
+| `estado.py` | `EstadoCorrida.abrir(excel)` abre o crea `corridas/<excel>.estado.json`. Por lote (clave `origen_id|destino_raiz_id`) guarda el estado de cada paso (`PASOS`: destino, clonacion, formato, verificacion, carga; `ESTADOS`: pendiente, en_curso, ok, con_diferencias, fallido, omitido), la carpeta destino real y el último error. `iniciar_corrida` / `cerrar_corrida`, `registrar_lote`, `marcar`, `avanzar` / `forzar_guardado` / `progreso` (progreso por paso, guardado como mucho cada 2 s y siempre al completarse), `completado`, `resumen`, `exportar_excel` (hojas "Estado" y "Corridas", colores por paso). Escritura atómica. Con `abrir(..., almacen=...)` el JSON y el xlsx van a un `Almacen` en vez de al disco. | `EstadoCorrida` |
 | `prevalidacion.py` | `prevalidar(excel, *, schema, simular, interactivo, ...) -> ResultadoPrevalidacion`: revisa en orden Excel, token, carpetas de Drive de cada lote, `CORREOS_AVISO` y base de datos (conexión y esquema). Nada lanza: todo termina en `Hallazgo` (ok / aviso / error). Con `simular`, correo y base son aviso. `cargar_env` (`.env` de la raíz y luego los de los módulos sin pisar), `correos_aviso`. | `prevalidar`, `ResultadoPrevalidacion`, `Hallazgo` |
+| `progreso.py` | `Avance(hechos, total, mensaje)` con `porcentaje()` (0..100; 0 si no hay total) y `como_dict()`; `Reporte(destino)` guarda el último avance de cada (lote, paso), avisa al destino en cada cambio y es seguro entre hilos (`threading.Lock`). Sin destino no hace nada. | `Avance`, `Reporte` |
+| `almacen.py` | Dónde se guardan los archivos de la corrida: `AlmacenLocal(carpeta)` (escritura atómica) y `AlmacenGCS(bucket, prefijo, cliente=None)` (google.cloud.storage, cliente inyectable). `crear_almacen("gs://bucket/prefijo")` o `crear_almacen(ruta)`. Métodos: `leer`, `escribir`, `listar`, `borrar`, `ruta_visible`. | `crear_almacen`, `Almacen` |
 
 
 ## Cómo encajan en una corrida
@@ -86,11 +88,16 @@ qué sobra y qué ya está.
 
 - `corridas/<excel>.estado.json`: `{"version", "excel", "creado", "actualizado", "corridas": [...], "lotes": {clave: {...}}}`.
   Cada lote guarda etiqueta, fila, cliente, `destino_id` / `destino_nombre`, un
-  registro por paso (`estado`, `fecha`, `detalle`, `motivo`, `accion`) y `ultimo_error`.
+  registro por paso (`estado`, `fecha`, `detalle`, `motivo`, `accion` y `progreso`:
+  `{hechos, total, mensaje, porcentaje}` para pintar la barra del frontend) y `ultimo_error`.
+  Los estados escritos antes del progreso se leen igual: la clave se lee con `.get`.
 - `corridas/<excel>.estado.xlsx`: hoja "Estado" (Etiqueta | Fila | Cliente | Carpeta destino |
   Enlace destino | Destino | Clonación | Formato | Verificación | Carga | Qué pasó | Qué hacer |
   Actualizado; verde ok, rojo fallido, amarillo con diferencias / en curso, gris pendiente / omitido)
   y hoja "Corridas" (Id | Inicio | Fin | Resultado).
+- Fuera del disco: `EstadoCorrida.abrir(excel, almacen=crear_almacen("gs://bucket/prefijo"))`
+  lee y escribe el JSON (y el xlsx) en Cloud Storage con el mismo nombre de objeto,
+  para cuando el run se ejecute en Cloud Run y el disco no sobreviva a la corrida.
 - Reanudar: `completado(clave, paso)` dice si un paso ya quedó en `ok`; `run_flujo.py` lo
   salta salvo `--rehacer`. Un `fallido` deja `ultimo_error` con qué pasó y qué hacer.
 
@@ -126,6 +133,7 @@ Reglas de las pruebas:
 
 Archivos: `test_mensajes.py`, `test_drive.py`, `test_nombres.py`,
 `test_excel.py`, `test_destino.py`, `test_clonacion.py`, `test_estado.py`,
+`test_progreso.py`, `test_almacen.py`,
 `test_prevalidacion.py`.
 
 

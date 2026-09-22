@@ -74,10 +74,22 @@ def _es_indexable(ruta: str, programa: str, meta: dict[str, str], parser=None) -
     return parser([programa, *ruta.split("/")], programa, meta) is not None
 
 
-def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: dict[str, str], parser=None) -> ResultadoVerificacion:
+def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: dict[str, str], parser=None, avance=None) -> ResultadoVerificacion:
+    """
+    Compara el clon con el origen. `avance` es un callable(hechos, total, mensaje)
+    opcional que avisa por fases (total = 3: inventariar origen, inventariar clon
+    y comparar). Con `avance=None` no cambia nada.
+    """
+    def informar(hechos: int, mensaje: str) -> None:
+        if avance is not None:
+            avance(hechos, 3, mensaje)
+
     resultado = ResultadoVerificacion()
+    informar(0, "Inventariando origen")
     origen, _ = _inventariar(svc, origen_id)
+    informar(1, "Inventariando clon")
     clon, _ = _inventariar(svc, clon_id)
+    informar(2, "Comparando")
     ori = Counter(_canon_ruta(r) for r in origen)
     dst = Counter(_canon_ruta(r) for r in clon)
     for ruta, cantidad in sorted((ori - dst).items()):
@@ -106,4 +118,5 @@ def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: di
                 resultado.agregar(f"PNG convertido sin contenido: {_canon_ruta(ruta)}.")
         elif item.get("md5Checksum") and (item.get("size"), item.get("md5Checksum")) != (copia.get("size"), copia.get("md5Checksum")):
             resultado.agregar(f"Contenido distinto al origen: {ruta}.")
+    informar(3, resultado.texto())
     return resultado

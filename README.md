@@ -79,6 +79,40 @@ copia lo que falte). Si un lote falla, se corrige la causa y se vuelve a ejecuta
 el mismo comando.
 
 
+## Servicio web
+
+Además del comando, el flujo se puede lanzar desde una página. Es la misma
+ejecución: la web reutiliza `run_flujo.ejecutar_corrida`, así que no hay dos
+comportamientos que mantener.
+
+Levantarlo en el equipo:
+
+```powershell
+python -m uvicorn servidor.app:app --port 8080
+```
+
+Y abrir `http://127.0.0.1:8080`. La página pide la carpeta de origen, la de
+destino y poco más; el cliente se detecta solo. Al pulsar Ejecutar se encola la
+corrida y la pantalla va mostrando los cinco pasos con su barra de avance, los
+mensajes del momento y, al terminar, el resultado con los enlaces.
+
+Detalles de cómo funciona:
+
+- Las corridas se ejecutan **de una en una**. Si alguien lanza otra mientras hay
+  una en marcha, espera en la cola; si es sobre la misma carpeta de origen, se
+  rechaza con un aviso.
+- Se puede cerrar el navegador: la corrida sigue y se puede volver a abrir desde
+  la lista de las últimas corridas.
+- Cancelar detiene la corrida **entre pasos**, no a mitad de una copia. Lo ya
+  hecho se conserva y se puede retomar.
+- El modo prueba viene marcado por defecto: no escribe en la base ni envía correo.
+- La cabecera muestra siempre contra qué cuenta y qué esquema se está trabajando,
+  y avisa en rojo si el esquema es producción.
+
+El despliegue en Google Cloud Run está documentado en `despliegue/README.md`,
+con la arquitectura en `despliegue/ARQUITECTURA.md`.
+
+
 ## Módulos
 
 - `flujo_lib/`: librería compartida del run único (token único, Excel, destino

@@ -49,3 +49,14 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# --- Despliegue en Cloud Run -------------------------------------------------
+# La plantilla (variables.env.example) SI se versiona; el archivo relleno con
+# valores reales del proyecto, no.
+despliegue/variables.env
+despliegue/*.env
+!despliegue/variables.env.example
+# Claves de cuenta de servicio descargadas al preparar los secretos.
+clave-*.json
+*-sa.json
+sa-*.json

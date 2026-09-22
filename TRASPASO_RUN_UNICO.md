@@ -41,7 +41,7 @@ están en el árbol de trabajo, sin commit. Suite verificada al corte:
 
 ```
 python -m unittest discover -s tests
-Ran 273 tests  OK
+Ran 414 tests  OK
 ```
 
 Revisión adversarial terminada el 2026-09-22. Se corrigieron dos hallazgos:
@@ -80,6 +80,44 @@ Modificados: `.gitignore` (agrega `corridas/`), `README.md`, `DOCUMENTACION_PROC
 No tocados a propósito (siguen con la semántica vieja, destino = carpeta final, tokens propios): `CAMBIAR_FORMATO/`, `CLONACION_CARPETA/`, `LMS_Fabrica/`, `rutas_excel.py`.
 
 Hay un `git stash` viejo ("borrador carpeta_destino") de un intento anterior. No sirve ya; se puede borrar con `git stash drop`.
+
+
+## 2 bis. Servicio web y despliegue (hecho el 2026-09-22)
+
+Sobre el run único se montó una página web y el despliegue en Google Cloud Run.
+
+- `servidor/app.py`: FastAPI. Sirve la página de `servidor/static/` y la API
+  (`POST /api/corridas`, `GET /api/corridas`, `GET /api/corridas/{id}`,
+  `POST /api/corridas/{id}/cancelar`, `GET /api/salud`).
+- `servidor/corridas.py`: cola de corridas ejecutadas **de una en una** en un
+  hilo de fondo. Reutiliza `run_flujo.ejecutar_corrida`, así que web y terminal
+  hacen exactamente lo mismo. Candado por carpeta de origen.
+- `servidor/configuracion.py`: variables de entorno y credenciales (modo `token`
+  o `cuenta_servicio` con delegación de dominio).
+- `servidor/static/`: formulario y pantalla de avance con barras por paso,
+  consola de mensajes y sondeo cada 2 s. Modo demostración con `?demo=1`.
+- `flujo_lib/progreso.py` y `flujo_lib/almacen.py`: avance paso a paso y estado
+  en disco o en Cloud Storage.
+- `Dockerfile`, `.dockerignore`, `requirements-servidor.txt` y `despliegue/`
+  (guía, arquitectura, plantilla de variables y `desplegar.ps1`).
+
+Cambios en la librería para que la web pudiera reutilizarla:
+`prevalidar(lotes=...)` acepta lotes ya armados sin Excel; `ejecutar_corrida`
+acepta `lotes`, `reporte`, `cargar_credenciales` y `cancelado`; los pasos
+aceptan `avance=None`; la prevalidación se guarda en el estado.
+
+Comprobado de verdad: la página se sirve, `/api/salud` responde con la cuenta
+`fabricadecontenidos@cun.edu.co`, y una prueba de extremo a extremo recorre
+petición HTTP → cola → run_flujo → Drive simulado.
+
+Limitaciones conocidas: un solo proceso y una sola instancia (los candados y las
+corridas viven en memoria); si el servicio se reinicia a mitad de una corrida,
+esa corrida queda interrumpida y hay que relanzarla; cancelar actúa entre pasos,
+no dentro de uno.
+
+Pendiente por parte de Camilo: instalar Google Cloud CLI y pedir al
+administrador de Google Workspace la cuenta de servicio con delegación (mientras
+tanto el despliegue funciona con el `token.json` actual en Secret Manager).
 
 
 ## 3. Lo que falta, en orden

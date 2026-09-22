@@ -1,0 +1,52 @@
+# =============================================================================
+# requirements-servidor.txt
+# Dependencias del servicio web desplegado (Cloud Run): FastAPI + el flujo.
+#
+# Se instala DENTRO de la imagen (ver Dockerfile) con Python 3.12.
+# Para trabajar en local se sigue usando el requirements.txt de cada modulo.
+#
+# Criterio de versiones: minimos razonables (>=), no exactos. Asi el despliegue
+# recoge correcciones de seguridad sin obligar a tocar este archivo cada mes.
+# Si alguna vez hace falta reproducir una imagen exacta, se congela aparte con
+# "pip freeze > requirements-servidor.lock.txt".
+# =============================================================================
+
+# --- Servidor web ---------------------------------------------------------
+# FastAPI sirve la pagina estatica de servidor/static/ y la API.
+fastapi>=0.115.0
+# uvicorn[standard] trae el arranque ASGI mas los extras utiles en produccion
+# (uvloop, httptools, websockets, watchfiles). Se ejecuta con UN solo worker.
+uvicorn[standard]>=0.30.0
+
+# --- Google Drive / Sheets / Gmail ---------------------------------------
+# Clientes de las APIs que usa flujo_lib/drive.py (token unico con los ambitos
+# de Drive, Spreadsheets y Gmail send).
+google-api-python-client>=2.140.0
+google-auth>=2.30.0
+google-auth-oauthlib>=1.2.0
+# Puente entre google-auth y httplib2; lo exige google-api-python-client y lo
+# declaran ya los requirements de CLONACION_CARPETA y LMS_Fabrica.
+google-auth-httplib2>=0.2.0
+# httplib2 se usa de forma explicita en flujo_lib/certificados.py (httplib2.CA_CERTS).
+httplib2>=0.22.0
+
+# --- Servicios de Google Cloud -------------------------------------------
+# Estado de las corridas persistido en un bucket (sobrevive a un reinicio).
+google-cloud-storage>=2.18.0
+# Lectura de la contrasena de la base y de las credenciales de Google cuando no
+# se montan como archivo, sino que se leen desde el codigo.
+google-cloud-secret-manager>=2.20.0
+
+# --- Datos y archivos -----------------------------------------------------
+# Excel de rutas y Excel de estado de la corrida.
+openpyxl>=3.1.0
+# Tablas intermedias del escaneo y de la carga (LMS_Fabrica).
+pandas>=2.2.0
+# Driver de PostgreSQL (Cloud SQL). La variante "binary" evita compilar libpq.
+psycopg2-binary>=2.9.9
+# Lectura del archivo .env en local; en Cloud Run las variables llegan del entorno.
+python-dotenv>=1.0.0
+# Conversion JPG/JPEG -> PNG del clon (flujo_lib/formato.py).
+Pillow>=10.4.0
+# Lista de autoridades certificadoras base que usa flujo_lib/certificados.py.
+certifi>=2024.7.4
