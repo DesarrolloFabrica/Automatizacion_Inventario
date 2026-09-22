@@ -13,6 +13,10 @@ credenciales.json
 token.json
 **/token.json
 
+# --- Certificados del equipo (se regeneran solos en cada corrida) ---
+certificados_confianza.pem
+**/certificados_confianza.pem
+
 # --- Artefactos de corridas ---
 corridas/
 *.log

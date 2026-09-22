@@ -20,7 +20,7 @@ Secuencia acordada con el usuario (no reabrir estas decisiones):
    2. Clonar el origen dentro de esa carpeta (reanudable).
    3. Convertir EN EL CLON todos los JPG/JPEG a PNG, conservando el nombre base (`pieza_01.JPG` → `pieza_01.png`). El origen nunca se modifica.
    4. Verificar el clon: completitud, integridad, ubicación por tipo de carpeta e indexabilidad.
-3. Compuerta: solo los lotes verificados se cargan a Cloud SQL, esquema `fabrica` (producción), cada lote en su transacción. Los fallidos se retienen y se reportan. Existe `--forzar-carga`, apagado por defecto.
+3. Compuerta: solo los lotes verificados se cargan a Cloud SQL, cada lote en su transacción. Los fallidos se retienen y se reportan. Existe `--forzar-carga`, apagado por defecto. El esquema por defecto es `fabrica_pruebas` mientras se valida el flujo (decisión de Camilo del 2026-09-22, que reemplaza la de cargar directo a producción); para `fabrica` hay que indicarlo a mano con `--schema fabrica`.
 4. Inventario a la Google Sheet fija y estado de la corrida en JSON y Excel.
 5. Un único correo final (exitoso / con pendientes / fallido) con tabla por lote, enlace a la Sheet, consulta SQL del lote y el Excel de estado adjunto. Correo de fallo en lenguaje no técnico: qué pasó y qué hacer.
 
@@ -30,16 +30,18 @@ Otras decisiones fijas:
 - Estado por lote en `corridas/` (ignorado por git) para reanudar sin duplicar; `--rehacer PASO` fuerza repetir.
 - Comparaciones origen↔clon SIEMPRE por nombre canónico (`flujo_lib/nombres.py`): base intacta + extensión en minúscula, jpg/jpeg ≡ png. Sin esto, una reejecución de la clonación borraría los PNG convertidos y volvería a copiar los JPG.
 - Reglas de ubicación por tipo de carpeta: ACTIVIDADES MOODLE → txt; SCORM → zip; PDF, FICHAS, REVISTA, GLOSARIO → pdf; PORTADA MATERIA → png; PODCAST → mp3; CONTENIDOS, GUION GRÁFICO, GUION PODCAST, QA → sin restricción por ahora.
+- La columna `cliente` del Excel es OPCIONAL desde el 2026-09-22 (pedido de Camilo: "se debe tener la capacidad de saber de dónde viene automáticamente"). Se deduce subiendo por las carpetas padre del origen en Drive hasta una llamada PRODUCTO, TANIA o LMS_CORRECCIONES, y de ahí sale también la escuela. Si el Excel trae valor, manda el Excel y se avisa cuando no coincide. Ver `flujo_lib/clasificacion.py`.
 - Primera entrega: un comando ejecutado por una persona. Frontend/backend vienen después; por eso toda la lógica vive en `flujo_lib/` y `run_flujo.py` solo orquesta.
 
 
-## 2. Estado actual (fases 1 y 2 implementadas y revisadas, SIN commit)
+## 2. Estado actual (fases 1 a 3 implementadas y revisadas; prueba de extremo a extremo hecha)
 
-Todo está en el árbol de trabajo, sin commit. Suite verificada al corte:
+Las fases 1 y 2 están commiteadas. La fase 3 y la prueba de extremo a extremo
+están en el árbol de trabajo, sin commit. Suite verificada al corte:
 
 ```
 python -m unittest discover -s tests
-Ran 255 tests  OK
+Ran 273 tests  OK
 ```
 
 Revisión adversarial terminada el 2026-09-22. Se corrigieron dos hallazgos:
@@ -63,10 +65,12 @@ Nuevo:
 | `flujo_lib/formato.py` | Conversión recursiva e idempotente JPG/JPEG → PNG únicamente en el clon; el JPG va a la papelera después de crear el PNG |
 | `flujo_lib/verificacion.py` | Completitud canónica, integridad, ubicación por tipo e indexabilidad; resultado `ok` / `con_diferencias` |
 | `flujo_lib/inventario.py` | Adaptador del inventario y publicación heredados con nombres canónicos para archivos |
+| `flujo_lib/gcp.py` | Escaneo del clon y carga transaccional por lote; simulación sin conexión y anti-duplicados por enlace |
+| `flujo_lib/notificar.py` | Construcción y envío del único correo final con tabla, SQL por lote y Excel adjunto |
 | `flujo_lib/estado.py` | `EstadoCorrida`: JSON por Excel, pasos `destino, clonacion, formato, verificacion, carga`, `exportar_excel` |
 | `flujo_lib/prevalidacion.py` | `prevalidar` → hallazgos ok/aviso/error por área (excel, token, drive, correo, db) |
 | `flujo_lib/README.md` | Descripción de la librería y cómo correr pruebas |
-| `run_flujo.py` | Orquestador en proceso único hasta formato, verificación, inventario y compuerta; deja la carga en `pendiente` o `omitido` |
+| `run_flujo.py` | Orquestador completo: prevalidación → Drive → formato → verificación → compuerta → carga → inventario → correo |
 | `renovar_token.py` | Autorización interactiva del token único |
 | `tests/fake_drive.py` | Drive simulado en memoria (get/list/create/copy/update/about, fallos inyectables) |
 | `tests/test_*.py` | Pruebas de cada módulo |
@@ -98,19 +102,29 @@ Se revisó con estos tres lentes y se corrigieron los hallazgos descritos en la 
   - Indexabilidad: que `LMS_Fabrica/generar_base_rutas.parsear_ruta_programa` (o `parsear_ruta`) clasifique cada archivo; los que no, se listan como "no indexables".
   - Resultado: `ok` / `con_diferencias` con lista de hallazgos legibles; se guarda en estado.
 - Inventario: implementado en `flujo_lib/inventario.py`; reutiliza los módulos heredados mediante una vista canónica sin modificarlos.
-- Compuerta en `run_flujo.py`: implementada. Los lotes `con_diferencias` quedan con carga `omitido`, salvo `--forzar-carga`, que los deja `pendiente` para fase 3. Código de salida 2 = con pendientes.
+- Compuerta en `run_flujo.py`: implementada. Los lotes `con_diferencias` quedan con carga `omitido`, salvo `--forzar-carga`, que permite cargarlos. Código de salida 2 = con pendientes.
 
-### 3.2 Fase 3: carga a GCP y correo único
+### 3.2 Fase 3: carga a GCP y correo único — COMPLETADA
 
-- `flujo_lib/gcp.py`: port en proceso de `LMS_Fabrica/generar_base_rutas.py` (escaneo del destino resuelto: `escanear_ruta_drive`, metadata de programa, `IdResolver`) y de `LMS_Fabrica/cargar_base_gcp.py` (`cargar_csv`). Programa = nombre de la carpeta clonada (= nombre del origen). Un lote = una transacción; `--schema` default `fabrica`; `--simular` no escribe; `--actualizar` no existe en el run único. Anti-duplicados por enlace se mantiene.
-- `flujo_lib/notificar.py`: un correo por corrida vía Gmail API con el token único. Cuerpo: título por resultado, tabla por lote (destino, clonación, formato, verificación, carga), enlace a la Sheet, consulta SQL por lote (reutilizar `LMS_Fabrica/notificar_carga_lms.consulta_sql`), adjunto `corridas/<excel>.estado.xlsx`. Correo de fallo: motivo y acción de `ErrorFlujo`, sin trazas. Destinatarios: `CORREOS_AVISO` del `.env` de la raíz.
-- `run_flujo.py`: integrar formato → verificación → compuerta → carga → inventario → correo; resumen final y códigos de salida 0/1/2.
-- Cierre: convertir los scripts antiguos en envoltorios de `flujo_lib` o retirarlos; un solo `.env` en la raíz; actualizar toda la documentación y `CHECKLIST_ENTREGA.md`; quitar la nota de migración.
+- `flujo_lib/gcp.py`: implementado con escaneo del destino, una transacción por lote, `--simular` sin conexión y anti-duplicados por enlace.
+- `flujo_lib/notificar.py`: implementado con Gmail API, tabla por lote, enlace a Sheet, consulta SQL por lote y Excel de estado adjunto; los fallos muestran qué pasó y qué hacer sin trazas.
+- `run_flujo.py`: integración completa y códigos de salida 0/1/2. `--rehacer carga` repite únicamente la carga; `--simular` no escribe ni envía correo.
+- Cierre pendiente por decisión previa: los scripts antiguos siguen intactos. La documentación principal y este traspaso ya reflejan el run completo.
 
 ### 3.3 Fase 4: pruebas de extremo a extremo y primera corrida
 
-- Prueba end-to-end con FakeDrive: Excel de 2 lotes, un lote con JPG y un archivo mal ubicado; comprobar estado, compuerta y correo (con Gmail simulado).
-- Primera corrida real supervisada con `--simular`, luego `--schema fabrica_pruebas`, y solo después `fabrica`.
+- Prueba de extremo a extremo — COMPLETADA. Está en `tests/test_end_to_end.py`:
+  Excel de dos lotes que comparten la raíz de destino, uno correcto con un JPG
+  real y otro con un PDF dentro de PORTADA MATERIA. Recorre prevalidación,
+  destino, clonación, conversión, verificación, compuerta, carga, inventario y
+  correo. Solo se sustituyen la sesión de Google, la conexión a la base, la
+  publicación en Sheets y el envío por Gmail; el resto se ejecuta de verdad,
+  incluidos los módulos heredados. Comprueba además que el origen queda intacto
+  y que una segunda corrida no duplica nada.
+- Primera corrida real supervisada — PENDIENTE. La hace Camilo, en este orden:
+  `--simular`, luego `--schema fabrica_pruebas`, y solo después `fabrica`.
+  Antes hace falta `credentials.json` en la raíz y `python renovar_token.py`
+  con la cuenta fábrica de contenidos.
 
 
 ## 4. Reglas de trabajo para quien continúe

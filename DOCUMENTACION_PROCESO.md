@@ -16,9 +16,8 @@ El run único (`run_flujo.py`), a partir de `RUTAS.xlsx`:
 
 1. Revisa antes de empezar que todo esté listo (Excel, token, acceso a Drive, correos, base de datos)  
 2. Crea la carpeta destino de cada lote dentro de la raíz indicada y clona origen → destino  
-3. Convierte JPG/JPEG a PNG en el clon, verifica origen vs clon, carga los lotes
-   verificados a Cloud SQL (`fabrica`) y envía un único correo final  
-   *(fases 2 y 3, pendientes; hoy quedan como "Pendiente" en el estado)*  
+3. Convierte JPG/JPEG a PNG en el clon, verifica origen vs clon, carga cada lote
+   verificado en una transacción de Cloud SQL (`fabrica_pruebas`) y envía un único correo final.
 
 Los scripts por módulo cubren lo mismo por separado: conversión en una carpeta
 dada, clonación + inventario + correo 1, CSV + carga + correo 2.
@@ -62,12 +61,12 @@ Los secretos y archivos de corrida (`corridas/` incluido) no se versionan.
 1) POR LOTE (orden de fila del Excel; estado en corridas/<excel>.estado.json)
     destino      -> crea o reutiliza, dentro de la raíz, la carpeta con el nombre del origen
     clonacion    -> copia origen -> carpeta destino (reanudable, sin duplicar)
-    formato      -> JPG/JPEG -> PNG en el clon                 [pendiente: fase 2]
-    verificacion -> origen vs clon por nombre canónico          [pendiente: fase 2]
+    formato      -> JPG/JPEG -> PNG en el clon
+    verificacion -> origen vs clon por nombre canónico
               |
               v
-2) COMPUERTA -> CARGA -> CORREO                                 [pendiente: fase 3]
-    carga a Cloud SQL (esquema fabrica) solo de los lotes verificados
+2) COMPUERTA -> CARGA -> INVENTARIO -> CORREO
+    carga a Cloud SQL (esquema fabrica_pruebas) solo de los lotes verificados
     un único correo final con el Excel de estado (o correo de fallo)
 ```
 
@@ -99,9 +98,9 @@ python run_flujo.py --excel "<RUTA>\RUTAS.xlsx"
 | Parámetro | Descripción |
 |---|---|
 | `--excel` | Ruta a `RUTAS.xlsx` (también variable `RUTAS_XLSX` o `RUTAS.xlsx` en la raíz) |
-| `--schema` | Esquema de Cloud SQL. Por defecto `fabrica` (producción). No se lee `LMS_SCHEMA` |
-| `--simular` | Hace todo menos escribir en la base y enviar correo. En fase 1: correo y base pasan de error a aviso en la prevalidación |
-| `--forzar-carga` | Se registra en la corrida; lo usará la compuerta de carga (fases 2/3). Por defecto apagado |
+| `--schema` | Esquema de Cloud SQL. Por defecto `fabrica_pruebas`. Producción: `--schema fabrica`. No se lee `LMS_SCHEMA` |
+| `--simular` | Hace todo menos escribir en la base y enviar correo |
+| `--forzar-carga` | Permite cargar lotes con diferencias de verificación. Por defecto apagado |
 | `--solo-prevalidar` | Ejecuta la prevalidación y termina |
 | `--rehacer PASO` | Repite ese paso aunque el estado diga OK: `destino`, `clonacion`, `formato`, `verificacion`, `carga` o `todo`. Repetible |
 | `--no-interactivo` | Si hace falta autorizar Google, falla con mensaje en vez de pedir login |
@@ -110,9 +109,9 @@ Códigos de salida:
 
 | Código | Significado |
 |---|---|
-| `0` | Todos los lotes con destino y clonación OK |
+| `0` | Flujo completo correcto |
 | `1` | Prevalidación fallida, algún lote fallido o corrida interrumpida (Ctrl+C) |
-| `2` | Reservado para "con pendientes" (fase 2) |
+| `2` | Hay lotes con diferencias retenidos por la compuerta |
 
 Salidas de cada corrida, en `corridas/` (no versionado):
 
@@ -153,8 +152,9 @@ Ver la documentación de cada directorio:
    vez y se vuelve a ejecutar.  
 4. Un solo token, en la raíz, de la cuenta fábrica de contenidos. Si venció:
    `python renovar_token.py`.  
-5. El run único carga al esquema `fabrica` (producción) por defecto. Los scripts
-   por módulo siguen en `fabrica_pruebas` salvo autorización expresa.  
+5. El run único carga al esquema `fabrica_pruebas` por defecto mientras se valida
+   el flujo. Producción (`fabrica`) se indica a mano con `--schema fabrica` y solo
+   con autorización expresa. Los scripts por módulo siguen igual.  
 6. Origen y clon se comparan por **nombre canónico** (base intacta, extensión en
    minúscula, `jpg`/`jpeg` → `png`): `x.JPG` del origen equivale a `x.png` del clon.  
 7. Nunca se modifica nada dentro de la carpeta origen.  
@@ -174,10 +174,13 @@ en el log de la corrida.
 | Mensaje o situación | Verificación |
 |---|---|
 | `El Excel RUTAS.xlsx está abierto o bloqueado.` | Cerrar el Excel y volver a ejecutar |
-| `El Excel RUTAS.xlsx tiene N fila(s) con errores. Fila 5: ...` | Corregir todas las filas indicadas (cliente vacío o no reconocido, enlace inválido, origen = destino, par repetido) |
+| `El Excel RUTAS.xlsx tiene N fila(s) con errores. Fila 5: ...` | Corregir todas las filas indicadas (cliente no reconocido, enlace inválido, origen = destino, par repetido). El cliente vacío no es error: se deduce de Drive |
+| `No se pudo saber a qué cliente pertenece el lote «X».` | La carpeta origen no cuelga de una carpeta PRODUCTO, TANIA o LMS_CORRECCIONES: escribir el cliente en el Excel o mover la carpeta en Drive |
+| `el Excel dice X pero en Drive la carpeta cuelga de «Y»` | Aviso, no detiene el flujo: manda el Excel. Corregir la columna cliente si el valor del Excel no es el correcto |
 | `No se encontró el archivo RUTAS.xlsx.` | Parámetro `--excel` o variable `RUTAS_XLSX` |
 | `Hay que autorizar la cuenta fábrica de contenidos en Google.` / `La sesión de Google venció.` | `python renovar_token.py` eligiendo la cuenta fábrica de contenidos |
 | `Falta el archivo credentials.json en ...` | Pedir a soporte el `credentials.json` de la cuenta fábrica y copiarlo en la raíz |
+| `certificate verify failed` / `self-signed certificate in certificate chain` | El antivirus del equipo (Kaspersky) revisa el tráfico seguro. El flujo lo resuelve solo reconociendo los certificados del equipo; si aparece, comprobar que `certificados_confianza.pem` se creó en la raíz |
 | `La cuenta fábrica de contenidos no tiene permiso sobre la carpeta origen del lote «X».` | Pedir acceso a esa carpeta para la cuenta fábrica |
 | `No se encontró la carpeta destino del lote «X».` | Revisar el enlace en el Excel; la carpeta pudo moverse o eliminarse |
 | `La carpeta ... del lote «X» no es una carpeta de Drive.` | El enlace apunta a un archivo, no a una carpeta |

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flujo_lib import drive  # noqa: E402
+from flujo_lib import certificados, drive  # noqa: E402
 from flujo_lib.mensajes import ErrorFlujo  # noqa: E402
 
 
@@ -31,6 +31,9 @@ def main() -> int:
         "Drive, Sheets y Gmail.",
         flush=True,
     )
+    # El antivirus del equipo puede inspeccionar el tráfico: hay que reconocer
+    # sus certificados antes de hablar con Google.
+    certificados.asegurar(log=lambda m: print(m, flush=True))
     try:
         creds = drive.autorizar()
         correo = drive.quien_soy(drive.construir_servicio(creds))

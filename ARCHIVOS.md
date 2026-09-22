@@ -12,10 +12,8 @@ RAÍZ
   DICCIONARIO_DATOS_EXCEL.md Columnas de RUTAS.xlsx
   CHECKLIST_ENTREGA.md       Verificación de cierre
   ARCHIVOS.md                Este listado
-  run_flujo.py               Run único. Fase 1: prevalidación, carpeta destino
-                             automática y clonación por lote, con estado en
-                             corridas/. Conversión, verificación, carga y correo
-                             quedan "Pendiente" (fases 2 y 3)
+  run_flujo.py               Run único completo, desde prevalidación hasta
+                             carga, inventario y correo final
   renovar_token.py           Autoriza la cuenta fábrica de contenidos y genera
                              el token único (token.json en la raíz)
   rutas_excel.py             Resolución de RUTAS.xlsx
@@ -31,9 +29,13 @@ flujo_lib/  (librería compartida del run único)
 
   __init__.py                ROOT (raíz del repo); sin imports pesados
   mensajes.py                ErrorFlujo (qué pasó + qué hacer) y traducir_excepcion
+  certificados.py            Reconoce los certificados del equipo cuando el
+                             antivirus inspecciona el tráfico seguro
   drive.py                   Token único (Drive + Sheets + Gmail), reintentos,
                              listado, lectura y creación de carpetas sin duplicar
   nombres.py                 Nombre canónico de archivos (jpg/jpeg ≡ png)
+  clasificacion.py           Detecta el cliente y la escuela subiendo por las
+                             carpetas padre del origen en Drive
   excel.py                   Lectura y validación de RUTAS.xlsx (todos los errores juntos)
   destino.py                 Carpeta destino automática dentro de la raíz
   clonacion.py               Clonación reanudable origen → destino (port de
@@ -41,6 +43,11 @@ flujo_lib/  (librería compartida del run único)
   estado.py                  Estado por lote en corridas/<excel>.estado.json y
                              exportación a Excel
   prevalidacion.py           Revisión previa: Excel, token, Drive, correos, base de datos
+  formato.py                 Conversión JPG/JPEG → PNG en el clon
+  verificacion.py            Completitud, integridad, ubicación e indexabilidad
+  inventario.py              Inventario Excel y publicación en Sheets
+  gcp.py                     Escaneo y carga transaccional por lote
+  notificar.py               Correo único final con Excel adjunto
   README.md                  Documentación de la librería y de las pruebas
 
 
@@ -58,6 +65,11 @@ tests/  (unittest; sin red, sin credenciales)
   test_clonacion.py          Clonación con el Drive falso
   test_estado.py             Estado de corrida y Excel de estado
   test_prevalidacion.py      Prevalidación con Drive y base de datos falsos
+  test_formato.py            Conversión con Drive falso
+  test_verificacion.py       Verificación del clon
+  test_inventario.py         Adaptador canónico del inventario
+  test_gcp.py                Simulación, transacción y rollback de carga
+  test_notificar.py          Correo único y adjunto con Gmail falso
 
   Ejecución: python -m unittest discover -s tests -v   (desde la raíz)
 
@@ -134,7 +146,7 @@ NOTIFICACIONES
 ==================================================
 
 Run único: un único correo final por corrida con el Excel de estado
-(y correo de fallo en lenguaje llano). Pendiente de fase 3.
+(y correo de fallo en lenguaje llano).
 
 Scripts por módulo:
   Tras la clonación  -> notificar_clonacion.py  -> enlace Google Sheet

@@ -22,7 +22,7 @@ se definen en el entorno local de ejecución.
    **fábrica de contenidos** (`python renovar_token.py`).
 3. Archivo `.env` en la raíz a partir de `.env.example` (`CORREOS_AVISO` y parámetros `DB_*`).
 4. Archivo `RUTAS.xlsx` conforme a `DICCIONARIO_DATOS_EXCEL.md`
-   (`cliente` obligatorio; `destino` es la carpeta **raíz** de destino).
+   (`cliente` opcional, se deduce de Drive; `destino` es la carpeta **raíz** de destino).
 
 Documentación operativa: `DOCUMENTACION_PROCESO.md`.  
 Librería del run único: `flujo_lib/README.md`.  
@@ -36,7 +36,7 @@ Documentación por módulo (scripts anteriores): `CAMBIAR_FORMATO/README.md`,
 python run_flujo.py --excel "<RUTA>\RUTAS.xlsx"
 ```
 
-Todo sale del Excel; no hay parámetros por lote. Qué hace hoy (fase 1):
+Todo sale del Excel; no hay parámetros por lote. El comando ejecuta el flujo completo:
 
 1. **Prevalidación**: Excel, token único, acceso a la carpeta origen y a la raíz
    destino de cada lote, `CORREOS_AVISO` y conexión a la base de datos con el
@@ -47,25 +47,21 @@ Todo sale del Excel; no hay parámetros por lote. Qué hace hoy (fase 1):
    raíz ya se llama como el origen (Excel antiguo), se usa directamente.
 3. **Clonación** origen → carpeta destino, reanudable y sin duplicar. Nunca se
    modifica nada dentro del origen.
-
-Pendiente para las fases siguientes: conversión JPG → PNG **en el clon**,
-verificación origen vs clon, compuerta, carga al esquema `fabrica` solo de los
-lotes verificados y un único correo final (más correo de fallo en lenguaje
-llano). Hoy esos pasos quedan como "Pendiente" en el estado de la corrida.
+4. **Conversión y verificación** del clon, con compuerta para retener diferencias.
+5. **Carga transaccional por lote** a Cloud SQL, inventario en Sheets y un único correo final.
 
 | Opción | Descripción |
 |---|---|
 | `--excel RUTA` | Ruta a `RUTAS.xlsx` (también variable `RUTAS_XLSX` o `RUTAS.xlsx` en la raíz). |
-| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica` (producción). El run único no lee `LMS_SCHEMA`. |
-| `--simular` | Hace todo menos escribir en la base y enviar correo. En fase 1: correo y base pasan de error a aviso en la prevalidación. |
-| `--forzar-carga` | Se registra en la corrida; lo usará la compuerta de carga (fases 2/3). Por defecto apagado. |
+| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica_pruebas` mientras se valida el flujo. Para producción: `--schema fabrica`. El run único no lee `LMS_SCHEMA`. |
+| `--simular` | Ejecuta el flujo sin escribir en la base ni enviar correo. |
+| `--forzar-carga` | Permite cargar lotes con diferencias de verificación. Por defecto apagado. |
 | `--solo-prevalidar` | Ejecuta solo la prevalidación y termina. |
 | `--rehacer PASO` | Repite ese paso aunque el estado diga OK: `destino`, `clonacion`, `formato`, `verificacion`, `carga` o `todo`. Se puede repetir. |
 | `--no-interactivo` | Si hace falta autorizar Google, falla con mensaje en vez de pedir login. |
 
-Códigos de salida: `0` todos los lotes con destino y clonación OK; `1`
-prevalidación fallida, algún lote fallido o corrida interrumpida; `2`
-reservado para "con pendientes" (fase 2).
+Códigos de salida: `0` flujo completo correcto; `1` prevalidación o algún paso
+falló; `2` hay lotes con diferencias retenidos por la compuerta.
 
 Salidas en `corridas/` (no versionado):
 
@@ -172,7 +168,9 @@ En runtime:
 
 Una fila = un lote.
 
-- `cliente`: `PRODUCTO`, `TANIA` o `LMS_correcciones`. **Obligatorio.**
+- `cliente`: `PRODUCTO`, `TANIA` o `LMS_correcciones`. **Opcional:** si se deja vacío
+  se deduce de la carpeta de Drive de la que cuelga el origen. Si se escribe, manda
+  el Excel y se avisa cuando no coincide con Drive.
 - `etiqueta`: apodo humano (no se guarda en GCP). Vacía → `Fila N`.
 - `origen`: carpeta a clonar. Su **nombre** en Drive es el de la carpeta que el
   flujo crea en el destino.
@@ -261,7 +259,8 @@ LMS_SCHEMA=fabrica_pruebas
 ```
 
 `LMS_SCHEMA` solo lo usan los scripts de `LMS_Fabrica`. El run único carga al
-esquema de `--schema` (por defecto `fabrica`, producción).
+esquema de `--schema`. Por defecto es `fabrica_pruebas`: mientras se valida el
+flujo nada llega a producción salvo que se pida a mano con `--schema fabrica`.
 
 ### Token único (run único)
 

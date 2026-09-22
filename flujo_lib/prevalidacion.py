@@ -3,9 +3,9 @@ flujo_lib/prevalidacion.py — revisión previa al run único (antes de tocar Dr
 ---------------------------------------------------------------------------------
 Antes de clonar nada comprueba, en este orden, que todo lo que el flujo va a
 necesitar esté listo: el Excel de rutas, el token único de la cuenta fábrica de
-contenidos, el acceso a cada carpeta de origen y destino de los lotes, los
-correos de aviso y la conexión a la base de datos (Cloud SQL) con el esquema
-indicado.
+contenidos, el acceso a cada carpeta de origen y destino de los lotes, a qué
+cliente pertenece cada lote, los correos de aviso y la conexión a la base de
+datos (Cloud SQL) con el esquema indicado.
 
 Nada se lanza como excepción: cada comprobación termina en un Hallazgo (ok,
 aviso o error) para mostrarlos todos de una vez y que la persona corrija el
@@ -19,17 +19,18 @@ from __future__ import annotations
 
 import os, re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from . import ROOT, drive
-from .excel import Lote, leer_lotes
+from .clasificacion import detectar as detectar_clasificacion
+from .excel import CLASIFICACIONES, Lote, leer_lotes
 from .mensajes import traducir_excepcion
 
 NIVELES = ("ok", "aviso", "error")
-AREAS = ("excel", "token", "drive", "correo", "db")
+AREAS = ("excel", "token", "drive", "cliente", "correo", "db")
 VARIABLES_DB = ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")
 PUERTO_DB_DEFECTO = 5432
 TIEMPO_CONEXION_DB = 30  # segundos, igual que LMS_Fabrica/cargar_base_gcp.py
@@ -181,6 +182,92 @@ def _revisar_drive(res: ResultadoPrevalidacion, log) -> None:
             )
 
 
+def _revisar_cliente(res: ResultadoPrevalidacion, log, detectar=None) -> None:
+    """
+    A qué cliente pertenece cada lote: lo que diga el Excel o, si viene vacío, la
+    carpeta de Drive de la que cuelga el origen (PRODUCTO, TANIA, LMS_CORRECCIONES).
+    Cuando el Excel y Drive no coinciden manda el Excel, pero se avisa.
+    """
+    if res.svc is None or not res.lotes:
+        return
+    detectar = detectar or detectar_clasificacion
+    log("Revisando a qué cliente pertenece cada lote...")
+    resueltos: list[Lote] = []
+    cache: dict[str, object] = {}  # mismo origen en varios lotes: una sola búsqueda
+    for lote in res.lotes:
+        if lote.origen_id not in res.carpetas:
+            resueltos.append(lote)  # el acceso al origen ya falló: no insistir
+            continue
+        contexto = f"la carpeta origen del lote «{lote.etiqueta}»"
+        hallado = None
+        try:
+            if lote.origen_id in cache:
+                hallado = cache[lote.origen_id]
+            else:
+                hallado = detectar(
+                    res.svc, lote.origen_id, inicial=res.carpetas[lote.origen_id]
+                )
+                cache[lote.origen_id] = hallado
+        except Exception as e:
+            err = traducir_excepcion(e, paso="cliente", contexto=contexto)
+            nivel = "aviso" if lote.clasificacion else "error"
+            res.agregar(nivel, "cliente", err.motivo, err.accion, err.detalle)
+
+        if hallado is None and not lote.clasificacion:
+            res.agregar(
+                "error",
+                "cliente",
+                f"No se pudo saber a qué cliente pertenece el lote «{lote.etiqueta}».",
+                "Escribe PRODUCTO, TANIA o LMS_CORRECCIONES en la columna cliente del "
+                "Excel, o mueve la carpeta dentro de la carpeta del cliente en Drive.",
+            )
+            resueltos.append(lote)
+            continue
+
+        if not lote.clasificacion:  # el Excel no lo dijo: mandan las carpetas de Drive
+            cliente, raiz = CLASIFICACIONES[hallado.clasificacion]
+            resueltos.append(
+                replace(
+                    lote,
+                    clasificacion=hallado.clasificacion,
+                    cliente_gcp=cliente,
+                    raiz_gcp=raiz,
+                    escuela_gcp=hallado.escuela,
+                )
+            )
+            res.agregar(
+                "ok",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: cliente {hallado.clasificacion} detectado "
+                f"en la carpeta «{hallado.carpeta}» de Drive"
+                + (f" (escuela «{hallado.escuela}»)." if hallado.escuela else "."),
+                detalle=" / ".join(hallado.ruta),
+            )
+            continue
+
+        # El Excel trae valor: manda, pero se compara con lo que dice Drive.
+        if hallado is not None and hallado.clasificacion != lote.clasificacion:
+            res.agregar(
+                "aviso",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: el Excel dice {lote.clasificacion} pero en Drive "
+                f"la carpeta cuelga de «{hallado.carpeta}» ({hallado.clasificacion}). "
+                f"Se usará {lote.clasificacion}, que es lo que dice el Excel.",
+                "Si no es correcto, corrige la columna cliente del Excel y vuelve a ejecutar.",
+                detalle=" / ".join(hallado.ruta),
+            )
+        else:
+            res.agregar(
+                "ok",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: cliente {lote.clasificacion} según el Excel"
+                + (" (coincide con Drive)." if hallado is not None else "."),
+            )
+        escuela = hallado.escuela if hallado is not None else ""
+        resueltos.append(replace(lote, escuela_gcp=lote.escuela_gcp or escuela))
+    res.lotes[:] = resueltos
+
+
 def _revisar_correo(res: ResultadoPrevalidacion, env: Mapping[str, str], simular: bool, log) -> None:
     log("Revisando los correos de aviso (CORREOS_AVISO)...")
     nivel = _nivel_falla(simular)
@@ -311,7 +398,7 @@ def prevalidar(
     log=print,
 ) -> ResultadoPrevalidacion:
     """
-    Revisa Excel, token, carpetas de Drive, correos y base de datos, en ese orden,
+    Revisa Excel, token, carpetas de Drive, cliente, correos y base de datos, en ese orden,
     y devuelve todos los hallazgos juntos (nunca lanza por un problema esperado).
 
     - env: variables a usar; None -> cargar_env() y os.environ.
@@ -337,6 +424,7 @@ def prevalidar(
         log=log,
     )
     _revisar_drive(res, log)
+    _revisar_cliente(res, log)
     _revisar_correo(res, env, simular, log)
     _revisar_db(res, env, schema, simular, conectar_db, log)
     return res

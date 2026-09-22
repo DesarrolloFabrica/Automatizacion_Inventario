@@ -23,7 +23,8 @@ Uso (PowerShell, desde la raíz del repo):
   python run_flujo.py --excel "<RUTA>\\RUTAS.xlsx" --rehacer clonacion
   python run_flujo.py --excel "<RUTA>\\RUTAS.xlsx" --simular --no-interactivo
 
-Opciones: --schema (default fabrica), --simular, --forzar-carga,
+Opciones: --schema (default fabrica_pruebas; producción: --schema fabrica),
+--simular, --forzar-carga,
 --solo-prevalidar, --rehacer {destino,clonacion,formato,verificacion,carga,todo}
 (repetible) y --no-interactivo. Si hay que autorizar Google de nuevo:
 python renovar_token.py.
@@ -31,11 +32,11 @@ python renovar_token.py.
 Códigos de salida: 0 todos los lotes convertidos y verificados; 1 prevalidación
 fallida o algún lote fallido; 2 hay lotes con diferencias retenidos por la compuerta.
 
-Estado de la migración: fase 2
+Estado de la migración: fase 3
 ------------------------------
-HACE: prevalidación, destino, clonación, conversión JPG→PNG en el clon,
-verificación, inventario y compuerta. PENDIENTE (fase 3): carga al esquema
-`fabrica` y correo único final. Los scripts antiguos no se modifican.
+HACE el flujo completo: prevalidación, destino, clonación, conversión JPG→PNG,
+verificación, compuerta, carga transaccional, inventario y correo único final.
+Los scripts antiguos no se modifican.
 """
 
 from __future__ import annotations
@@ -47,23 +48,26 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flujo_lib import drive  # noqa: E402
+from flujo_lib import certificados, drive  # noqa: E402
 from flujo_lib.clonacion import clonar_arbol  # noqa: E402
 from flujo_lib.destino import describir, resolver_destino  # noqa: E402
 from flujo_lib.estado import DIR_CORRIDAS, ETIQUETAS_ESTADO, PASOS, EstadoCorrida  # noqa: E402
 from flujo_lib.excel import Lote, resolver_excel  # noqa: E402
 from flujo_lib.formato import convertir_arbol  # noqa: E402
+from flujo_lib.gcp import cargar_lote, escanear_lote  # noqa: E402
 from flujo_lib.inventario import generar_inventario, publicar_inventario  # noqa: E402
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion  # noqa: E402
+from flujo_lib.notificar import construir_mensaje, enviar_correo  # noqa: E402
 from flujo_lib.prevalidacion import ResultadoPrevalidacion, correos_aviso, prevalidar  # noqa: E402
 from flujo_lib.verificacion import verificar_lote  # noqa: E402
 
-SCHEMA_DEFECTO = "fabrica"  # producción: el run único carga ahí por decisión del usuario
+SCHEMA_PRODUCCION = "fabrica"
+# Mientras se valida el run único se carga al esquema de pruebas.
+# Para producción hay que pedirlo a mano: --schema fabrica.
+SCHEMA_DEFECTO = "fabrica_pruebas"
 PASOS_REHACER = PASOS + ("todo",)
-PASOS_PENDIENTES = ("carga",)
-NOTA_PENDIENTE = "Pendiente: la carga se implementa en la fase 3 del flujo"
 NOTA_OMITIDO = "No se ejecutó porque falló el paso anterior"
-NOTA_FASES = "La carga a GCP y el correo único se incorporan en la fase 3."
+NOTA_FASES = "Run único completado: Drive, verificación, inventario, Cloud SQL y notificación."
 ACCION_REINTENTAR_COPIA = (
     "Vuelve a ejecutar; solo se copiará lo que falta. "
     "Si persiste, revisa permisos de esos archivos."
@@ -82,7 +86,7 @@ def construir_parser() -> argparse.ArgumentParser:
         prog="run_flujo.py",
         description=(
             "Run único de la fábrica de contenidos: prevalida, clona, convierte, "
-            "verifica e inventaría cada lote de RUTAS.xlsx (fase 2)."
+            "verifica, carga e inventaría cada lote de RUTAS.xlsx (flujo completo)."
         ),
         epilog='Ejemplo: python run_flujo.py --excel "C:\\ruta\\RUTAS.xlsx"',
     )
@@ -98,7 +102,10 @@ def construir_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--schema",
         default=SCHEMA_DEFECTO,
-        help=f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, producción).",
+        help=(
+            f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, el de pruebas). "
+            f"Para producción hay que indicarlo a mano: --schema {SCHEMA_PRODUCCION}."
+        ),
     )
     parser.add_argument(
         "--simular",
@@ -113,7 +120,7 @@ def construir_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Carga aunque la verificación tenga diferencias "
-            "(se aplica en la compuerta de las fases siguientes; por defecto apagado)."
+            "(por defecto apagado)."
         ),
     )
     parser.add_argument(
@@ -145,6 +152,15 @@ def pasos_a_rehacer(valores) -> set[str]:
     """Convierte la lista de --rehacer en el conjunto de pasos a repetir ("todo" = todos)."""
     pedidos = set(valores or [])
     return set(PASOS) if "todo" in pedidos else pedidos
+
+
+def pasos_efectivos_a_rehacer(valores) -> set[str]:
+    """Incluye dependientes posteriores para no conservar resultados obsoletos."""
+    pedidos = pasos_a_rehacer(valores)
+    if not pedidos:
+        return set()
+    primero = min(PASOS.index(p) for p in pedidos)
+    return set(PASOS[primero:])
 
 
 def argumentos_corrida(args: argparse.Namespace, excel: Path) -> dict:
@@ -405,6 +421,14 @@ def convertir_lote(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
     return True
 
 
+def _meta_gcp(lote: Lote) -> dict[str, str]:
+    """Cliente, raíz y escuela del lote tal como se guardan en Cloud SQL."""
+    meta = {"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp}
+    if getattr(lote, "escuela_gcp", ""):
+        meta["escuela"] = lote.escuela_gcp
+    return meta
+
+
 def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str]) -> bool:
     clave = lote.clave
     if estado.completado(clave, "verificacion") and "verificacion" not in rehacer:
@@ -413,7 +437,7 @@ def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
         resultado = verificar_lote(
             svc, lote.origen_id, destino_id,
             programa=estado.destino_de(clave)[1] or lote.etiqueta,
-            meta={"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp},
+            meta=_meta_gcp(lote),
         )
     except Exception as e:
         _fallar_paso(
@@ -430,24 +454,36 @@ def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
     return True
 
 
-def anotar_pendientes(estado: EstadoCorrida, clave: str) -> None:
-    """
-    Formato, verificación y carga aún no existen en esta fase: se dejan en
-    "pendiente" con una nota. Si venían "omitido" por un fallo anterior ya
-    resuelto, vuelven a "pendiente". Un estado "ok" o "fallido" no se toca.
-    """
-    for paso in PASOS_PENDIENTES:
-        actual = estado.paso(clave, paso)
-        if actual["estado"] not in ("pendiente", "omitido"):
-            continue
-        if actual["estado"] == "pendiente" and actual["detalle"] == NOTA_PENDIENTE:
-            continue
-        estado.marcar(clave, paso, "pendiente", detalle=NOTA_PENDIENTE)
+def cargar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino_nombre: str, *, schema: str, simular: bool, rehacer: set[str]) -> bool:
+    clave = lote.clave
+    if estado.completado(clave, "carga") and "carga" not in rehacer:
+        logging.info("Lote «%s»: carga ya completada en una corrida anterior.", lote.etiqueta)
+        return True
+    estado.marcar(clave, "carga", "en_curso", detalle="Preparando archivos indexables")
+    try:
+        filas = escanear_lote(svc, destino_id, lote, destino_nombre)
+        stats = cargar_lote(filas, schema=schema, simular=simular, log=logging.info)
+    except Exception as e:
+        _fallar_paso(estado, lote, "carga", traducir_excepcion(e, paso="carga", contexto=f"el lote «{lote.etiqueta}»"))
+        return False
+    programas = sorted({f.get("programa_nombre", "") for f in filas if f.get("programa_nombre")})
+    eliminados = stats.get("eliminados", 0)
+    if simular:
+        detalle = f"Simulación: {stats.get('simulados', 0)} archivo(s) listo(s); no se escribió en Cloud SQL."
+    else:
+        reemplazo = f"{eliminados} reemplazado(s), " if eliminados else ""
+        detalle = (
+            f"{reemplazo}{stats.get('insertados', 0)} insertado(s), "
+            f"{stats.get('existentes', 0)} ya existente(s)."
+        )
+    estado.marcar(clave, "carga", "ok", detalle=detalle, estadisticas=stats, programas=programas)
+    logging.info("Lote «%s»: %s", lote.etiqueta, detalle)
+    return True
 
 
 def procesar_lote(
     estado: EstadoCorrida, svc, lote: Lote, carpetas: dict[str, dict], rehacer: set[str],
-    forzar_carga: bool = False,
+    forzar_carga: bool = False, schema: str = SCHEMA_DEFECTO, simular: bool = False,
 ) -> bool:
     """Destino → clonación → formato → verificación → compuerta."""
     estado.registrar_lote(lote)
@@ -463,11 +499,11 @@ def procesar_lote(
     verificado = verificar_paso(estado, svc, lote, destino[0], rehacer)
     if not verificado and not forzar_carga:
         estado.marcar(lote.clave, "carga", "omitido", detalle="Retenido por la compuerta: la verificación encontró diferencias")
-    elif estado.paso(lote.clave, "carga")["estado"] in ("omitido", "pendiente"):
-        estado.marcar(lote.clave, "carga", "pendiente", detalle=NOTA_PENDIENTE)
-    if verificado or forzar_carga:
-        anotar_pendientes(estado, lote.clave)
-    return verificado
+        return False
+    return cargar_paso(
+        estado, svc, lote, destino[0], destino[1], schema=schema,
+        simular=simular, rehacer=rehacer,
+    ) and verificado
 
 
 # ---------------------------------------------------------------------------
@@ -482,8 +518,11 @@ def _cerrar_sin_fallar(estado: EstadoCorrida, resultado: str) -> None:
 
 def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrida, ruta_log: Path) -> int:
     """Prevalidación → lotes → cierre. Devuelve el código de salida."""
-    rehacer = pasos_a_rehacer(args.rehacer)
-    logging.info("Run único de la fábrica de contenidos (fase 2)")
+    rehacer = pasos_efectivos_a_rehacer(args.rehacer)
+    # Antes de la primera llamada a Google: reconocer los certificados del
+    # equipo (antivirus o red que inspeccionan el tráfico seguro).
+    certificados.asegurar(log=logging.info)
+    logging.info("Run único de la fábrica de contenidos")
     logging.info("  Excel   : %s", excel)
     logging.info(
         "  Esquema : %s%s",
@@ -510,6 +549,20 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
             estado.cerrar_corrida("fallido_prevalidacion")
             ruta_xlsx = exportar_estado(estado)
             logging.error("El flujo no arrancó. Corrige lo anterior y vuelve a ejecutar.")
+            if not args.simular and ruta_xlsx is not None and res.creds is not None:
+                try:
+                    primero = res.errores()[0]
+                    mensaje = construir_mensaje(
+                        destinatarios=correos_aviso(), resultado="fallido",
+                        schema=args.schema, filas=[], enlace_sheet="",
+                        estado_xlsx=ruta_xlsx,
+                        error_general={"motivo": primero.mensaje, "accion": primero.accion},
+                    )
+                    enviar_correo(res.creds, mensaje)
+                    logging.info("Correo final de fallo enviado.")
+                except Exception as e:
+                    logging.warning("No se pudo enviar el correo final de fallo. Revisa la sesión de Google y vuelve a ejecutar.")
+                    logging.debug("    detalle: %r", e)
             imprimir_rutas(estado, ruta_log, ruta_xlsx)
             return 1
         if args.solo_prevalidar:
@@ -520,7 +573,8 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
 
         logging.info("Prevalidación correcta. Procesando %d lote(s)...", len(res.lotes))
         exitos = sum(1 for lote in res.lotes if procesar_lote(
-            estado, res.svc, lote, res.carpetas, rehacer, args.forzar_carga
+            estado, res.svc, lote, res.carpetas, rehacer, args.forzar_carga,
+            args.schema, args.simular,
         ))
         trabajos = []
         for lote in res.lotes:
@@ -557,6 +611,29 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
         return 1
 
     ruta_xlsx = exportar_estado(estado)
+    correo_ok = True
+    if not args.simular and ruta_xlsx is not None:
+        try:
+            filas_correo = []
+            for fila in estado.resumen():
+                if fila["clave"] not in {l.clave for l in res.lotes}:
+                    continue
+                paso_carga = estado.paso(fila["clave"], "carga")
+                filas_correo.append({**fila, "programas": paso_carga.get("programas") or []})
+            mensaje = construir_mensaje(
+                destinatarios=correos_aviso(), resultado=resultado_final,
+                schema=args.schema, filas=filas_correo,
+                enlace_sheet=(estado.datos.get("inventario") or {}).get("sheet", ""),
+                estado_xlsx=ruta_xlsx,
+            )
+            enviar_correo(res.creds, mensaje)
+            logging.info("Correo final enviado a: %s", ", ".join(correos_aviso()))
+        except Exception as e:
+            correo_ok = False
+            err = traducir_excepcion(e, paso="correo", contexto="el correo final")
+            logging.error("No se pudo enviar el correo final. %s", err)
+            logging.debug("    detalle: %s", err.detalle)
+            estado.cerrar_corrida("fallido_notificacion")
     logging.info("=" * 60)
     imprimir_resumen(estado, res.lotes)
     if hay_fallos:
@@ -572,7 +649,7 @@ def ejecutar_corrida(args: argparse.Namespace, excel: Path, estado: EstadoCorrid
         logging.info("Corrida terminada: %d lote(s) convertidos y verificados.", exitos)
     imprimir_rutas(estado, ruta_log, ruta_xlsx)
     logging.info(NOTA_FASES)
-    return 1 if hay_fallos else 2 if hay_diferencias else 0
+    return 1 if hay_fallos or not correo_ok else 2 if hay_diferencias else 0
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -193,7 +193,8 @@ class TestTodoOk(BasePrevalidacion):
         self.assertEqual(res.carpetas[RAIZ_B]["name"], "LMS_Carga 2")
         # un ok por área (drive: uno por lote) y en el orden del contrato
         self.assertEqual(
-            [h.area for h in res.hallazgos], ["excel", "token", "drive", "drive", "correo", "db"]
+            [h.area for h in res.hallazgos],
+            ["excel", "token", "drive", "drive", "cliente", "cliente", "correo", "db"],
         )
         self.assertTrue(all(h.nivel == "ok" for h in res.hallazgos))
 
@@ -271,11 +272,11 @@ class TestTodoOk(BasePrevalidacion):
 # ---------------------------------------------------------------------------
 class TestExcel(BasePrevalidacion):
     def test_excel_invalido_es_error_y_el_resto_sigue(self):
-        excel = self.excel([CABECERA, ["", "Bogotá", ORIGEN_A, RAIZ_A]])
+        excel = self.excel([CABECERA, ["PRODUCTO", "Bogotá", "no es un enlace", RAIZ_A]])
         res = self.prevalidar(excel)
         self.assertFalse(res.ok)
         err = self.unico(res, "excel", "error")
-        self.assertIn("Fila 2: cliente vacío", err.mensaje)
+        self.assertIn("Fila 2: enlace de origen inválido", err.mensaje)
         self.assertEqual(err.accion, "Corrige el Excel y vuelve a ejecutar.")
         self.assertEqual(res.lotes, [])
         # token, correo y db se revisan igual; drive no (no hay lotes)
@@ -571,7 +572,7 @@ class TestAcumulado(BasePrevalidacion):
         with self.assertRaises(ValueError):
             Hallazgo("ok", "sheets", "m")
         self.assertEqual(NIVELES, ("ok", "aviso", "error"))
-        self.assertEqual(AREAS, ("excel", "token", "drive", "correo", "db"))
+        self.assertEqual(AREAS, ("excel", "token", "drive", "cliente", "correo", "db"))
 
     def test_resultado_ok_errores_avisos(self):
         res = ResultadoPrevalidacion()

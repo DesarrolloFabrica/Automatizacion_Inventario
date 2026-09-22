@@ -238,11 +238,12 @@ class TestLeerLotesErrores(BaseExcel):
             }
         )
         e = self.leer_error(ruta)
-        self.assertIn("Fila 2: cliente vacío", e.motivo)
+        # La fila 2 no tiene cliente: eso ya no es un error (se deduce de Drive).
+        self.assertNotIn("Fila 2", e.motivo)
         self.assertIn("Fila 3: enlace de origen inválido", e.motivo)
         self.assertIn("Fila 4: enlace de destino vacío", e.motivo)
         self.assertNotIn("Fila 5", e.motivo)
-        self.assertIn("3 fila(s)", e.motivo)
+        self.assertIn("2 fila(s)", e.motivo)
         self.assertEqual(e.accion, "Corrige el Excel y vuelve a ejecutar.")
         self.assertEqual(e.paso, "excel")
         self.assertEqual(e.contexto, "RUTAS.xlsx")
@@ -273,10 +274,26 @@ class TestLeerLotesErrores(BaseExcel):
         self.assertIn("Fila 4: repite el origen y destino de la fila 2", e.motivo)
         self.assertNotIn("Fila 3", e.motivo)
 
-    def test_falta_columna_cliente(self):
+    def test_sin_columna_cliente_se_lee_y_queda_sin_clasificar(self):
+        """Sin columna cliente el Excel es válido: la clasificación sale de Drive."""
         ruta = self.excel({1: ["etiqueta", "origen", "destino"], 2: ["x", URL_A, ID_RAIZ]})
+        lotes = leer_lotes(ruta)
+        self.assertEqual(len(lotes), 1)
+        self.assertTrue(lotes[0].sin_clasificar)
+        self.assertEqual(lotes[0].clasificacion, "")
+        self.assertEqual(lotes[0].cliente_gcp, "")
+        self.assertEqual(lotes[0].raiz_gcp, "")
+
+    def test_cliente_vacio_queda_sin_clasificar(self):
+        ruta = self.excel({1: CABECERA, 2: [None, "Sin cliente", URL_A, ID_RAIZ]})
+        lotes = leer_lotes(ruta)
+        self.assertEqual(len(lotes), 1)
+        self.assertTrue(lotes[0].sin_clasificar)
+
+    def test_cliente_escrito_pero_inexistente_sigue_siendo_error(self):
+        ruta = self.excel({1: CABECERA, 2: ["MARKETING", "x", URL_A, ID_RAIZ]})
         e = self.leer_error(ruta)
-        self.assertIn("falta la columna cliente", e.motivo)
+        self.assertIn("no reconocido", e.motivo)
 
     def test_faltan_varias_columnas(self):
         ruta = self.excel({1: ["cliente", "etiqueta"], 2: ["PRODUCTO", "x"]})

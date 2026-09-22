@@ -7,6 +7,9 @@ una sola lectura con openpyxl (sin pandas) que devuelve la lista de lotes
 (cliente | etiqueta | origen | destino) ya validada, o UNA ExcelInvalido que
 enumera todos los problemas encontrados para corregirlos de una vez.
 
+La columna `cliente` es opcional: cuando está vacía, la prevalidación deduce el
+cliente de dónde cuelga el origen en Drive (ver flujo_lib/clasificacion.py).
+
 Recordatorio: `destino` es la carpeta RAÍZ de destino; el flujo crea dentro
 una carpeta con el nombre del origen (ver flujo_lib/destino.py).
 """
@@ -54,7 +57,7 @@ _ALIAS_COLUMNAS = {
     "origen": ("origen",),
     "destino": ("destino",),
 }
-_OBLIGATORIAS = ("cliente", "origen", "destino")
+_OBLIGATORIAS = ("origen", "destino")  # `cliente` es opcional: se detecta desde Drive
 _FILAS_CABECERA = 10  # la cabecera debe estar en las primeras N filas
 _ACCION_CORREGIR = "Corrige el Excel y vuelve a ejecutar."
 _CLIENTES_VALIDOS = "PRODUCTO, TANIA o LMS_CORRECCIONES"
@@ -112,6 +115,12 @@ class Lote:
     destino_raiz_id: str
     origen_raw: str
     destino_raw: str
+    escuela_gcp: str = ""  # se completa al detectar la clasificación en Drive
+
+    @property
+    def sin_clasificar(self) -> bool:
+        """True si el Excel no trajo cliente y hay que deducirlo de Drive."""
+        return not self.clasificacion
 
     @property
     def clave(self) -> str:
@@ -224,7 +233,7 @@ def _localizar_cabecera(libro, nombre: str):
                     )
                 return hoja, numero, columnas
     raise ExcelInvalido(
-        f"No se encontró la fila de cabecera (cliente | etiqueta | origen | destino) "
+        f"No se encontró la fila de cabecera (etiqueta | origen | destino, y cliente si se indica) "
         f"en las primeras {_FILAS_CABECERA} filas del Excel {nombre}.",
         "Revisa que la hoja tenga esa cabecera y vuelve a ejecutar.",
         contexto=nombre,
@@ -239,10 +248,10 @@ def _leer_fila(numero: int, fila: tuple, columnas: dict[str, int | None]) -> tup
     origen_raw = _texto(_celda(fila, columnas["origen"]))
     destino_raw = _texto(_celda(fila, columnas["destino"]))
 
+    # `cliente` vacío no es un error: se deduce de dónde cuelga el origen en Drive
+    # (ver flujo_lib/clasificacion.py). Solo se rechaza un valor escrito que no existe.
     clasificacion = normalizar_clasificacion(cliente_raw)
-    if not cliente_raw:
-        fallas.append("cliente vacío")
-    elif clasificacion is None:
+    if cliente_raw and clasificacion is None:
         fallas.append(f"cliente «{cliente_raw}» no reconocido (usa {_CLIENTES_VALIDOS})")
 
     ids: dict[str, str | None] = {}
@@ -258,14 +267,14 @@ def _leer_fila(numero: int, fila: tuple, columnas: dict[str, int | None]) -> tup
     if ids["origen"] and ids["destino"] and ids["origen"] == ids["destino"]:
         fallas.append("origen y destino son la misma carpeta")
 
-    if fallas or clasificacion is None or not ids["origen"] or not ids["destino"]:
+    if fallas or not ids["origen"] or not ids["destino"]:
         return None, fallas
-    cliente_gcp, raiz_gcp = CLASIFICACIONES[clasificacion]
+    cliente_gcp, raiz_gcp = CLASIFICACIONES[clasificacion] if clasificacion else ("", "")
     lote = Lote(
         fila=numero,
         etiqueta=etiqueta,
         cliente_excel=cliente_raw,
-        clasificacion=clasificacion,
+        clasificacion=clasificacion or "",
         cliente_gcp=cliente_gcp,
         raiz_gcp=raiz_gcp,
         origen_id=ids["origen"],
@@ -283,10 +292,13 @@ def leer_lotes(ruta: Path) -> list[Lote]:
     - Cabecera: primera fila (en las 10 primeras) con "destino" o "cliente"; se
       busca primero en la hoja activa y luego en las demás.
     - Columnas: cliente|tipo|clasificacion|clasificación, etiqueta|programa,
-      origen, destino. cliente, origen y destino son obligatorias.
+      origen, destino. Solo origen y destino son obligatorias.
+    - `cliente` es opcional: si viene vacío se deduce de dónde cuelga el origen
+      en Drive (flujo_lib/clasificacion.py); si trae un valor que no existe, sí
+      es error. Cuando falta, el lote queda con `sin_clasificar` en True.
     - Se saltan las filas sin nada en esas cuatro columnas. Cada fila debe tener
-      cliente válido y enlaces de origen y destino usables y distintos; no puede
-      repetirse el par origen+destino. Etiqueta vacía -> "Fila N".
+      enlaces de origen y destino usables y distintos; no puede repetirse el par
+      origen+destino. Etiqueta vacía -> "Fila N".
     - Todos los problemas de fila se acumulan y se lanza UNA ExcelInvalido.
     """
     ruta = Path(ruta)

@@ -106,7 +106,7 @@ class BaseRunFlujo(unittest.TestCase):
         self.fake.agregar_archivo("pieza_02.jpeg", ORIGEN_B, contenido=b"jpg2", mime="image/jpeg")
         self.fake.agregar_carpeta("LMS_Carga", id=RAIZ)
         self.svc = self.fake  # lo que devuelve construir_servicio (se puede envolver)
-        self.db = BaseFalsa()
+        self.db = BaseFalsa(esquemas=("fabrica", "fabrica_pruebas"))
         self.resumenes: list[clonacion.ResumenClon] = []
         self.salida = io.StringIO()
 
@@ -126,6 +126,10 @@ class BaseRunFlujo(unittest.TestCase):
             mock.patch("run_flujo.verificar_lote", return_value=ResultadoVerificacion()),
             mock.patch("run_flujo.generar_inventario", side_effect=lambda _s, _t, salida: salida),
             mock.patch("run_flujo.publicar_inventario", return_value="https://docs.google.com/spreadsheets/d/fake/edit"),
+            mock.patch("run_flujo.escanear_lote", return_value=[{"programa_nombre": "PROGRAMA", "archivo_enlace": "https://drive/fake"}]),
+            mock.patch("run_flujo.cargar_lote", return_value={"total": 1, "insertados": 1, "existentes": 0, "simulados": 0}),
+            mock.patch("run_flujo.construir_mensaje", return_value=object()),
+            mock.patch("run_flujo.enviar_correo", return_value={"id": "correo-falso"}),
             mock.patch.dict(os.environ, ENV_OK),
         ]
         for p in parches:
@@ -181,6 +185,19 @@ class BaseRunFlujo(unittest.TestCase):
 # (a) corrida feliz y (b)/(c) reanudación
 # ---------------------------------------------------------------------------
 class TestCorridaFeliz(BaseRunFlujo):
+    def test_fase3_envia_un_solo_correo_por_corrida(self):
+        excel = self.excel()
+        self.assertEqual(self.correr(excel), 0)
+        self.assertEqual(run_flujo.enviar_correo.call_count, 1)
+        self.assertEqual(run_flujo.cargar_lote.call_count, 2)
+        self.assertTrue(all(self.lote(origen)["pasos"]["carga"]["estado"] == "ok" for origen in (ORIGEN_A, ORIGEN_B)))
+
+    def test_simular_no_escribe_base_ni_envia_correo(self):
+        excel = self.excel()
+        self.assertEqual(self.correr(excel, "--simular"), 0)
+        self.assertTrue(all(llamada.kwargs["simular"] for llamada in run_flujo.cargar_lote.call_args_list))
+        run_flujo.enviar_correo.assert_not_called()
+
     def test_a_dos_lotes_clonados_estado_y_excel(self):
         excel = self.excel()
         codigo = self.correr(excel)
@@ -211,7 +228,7 @@ class TestCorridaFeliz(BaseRunFlujo):
             datos["corridas"][0]["argumentos"],
             {
                 "excel": str(excel.resolve()),
-                "schema": "fabrica",
+                "schema": "fabrica_pruebas",
                 "simular": False,
                 "forzar_carga": False,
                 "solo_prevalidar": False,
@@ -224,7 +241,7 @@ class TestCorridaFeliz(BaseRunFlujo):
             "clonacion": "ok",
             "formato": "ok",
             "verificacion": "ok",
-            "carga": "pendiente",
+            "carga": "ok",
         }
         self.assertEqual(self.pasos(ORIGEN_A), esperado)
         self.assertEqual(self.pasos(ORIGEN_B), esperado)
@@ -237,7 +254,7 @@ class TestCorridaFeliz(BaseRunFlujo):
         self.assertIn("creada «Bogotá 2026» dentro de «LMS_Carga»", lote_a["pasos"]["destino"]["detalle"])
         self.assertIn("3 archivo(s) copiado(s)", lote_a["pasos"]["clonacion"]["detalle"])
         self.assertIn("convertido", lote_a["pasos"]["formato"]["detalle"])
-        self.assertEqual(lote_a["pasos"]["carga"]["detalle"], run_flujo.NOTA_PENDIENTE)
+        self.assertIn("insertado", lote_a["pasos"]["carga"]["detalle"])
 
         # Excel de estado y log de la corrida.
         xlsx = self.dir_corridas / "RUTAS.estado.xlsx"
@@ -353,7 +370,7 @@ class TestCorridaFeliz(BaseRunFlujo):
             self.assertEqual(self.correr(excel, "--rehacer", "verificacion", "--forzar-carga"), 2)
         lote = self.lote(ORIGEN_A)
         self.assertEqual(lote["pasos"]["verificacion"]["estado"], "con_diferencias")
-        self.assertEqual(lote["pasos"]["carga"]["estado"], "pendiente")
+        self.assertEqual(lote["pasos"]["carga"]["estado"], "ok")
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +480,7 @@ class TestParser(unittest.TestCase):
     def test_defaults(self):
         args = run_flujo.construir_parser().parse_args([])
         self.assertIsNone(args.excel)
-        self.assertEqual(args.schema, "fabrica")
+        self.assertEqual(args.schema, "fabrica_pruebas")  # pruebas, no producción
         self.assertFalse(args.simular)
         self.assertFalse(args.forzar_carga)
         self.assertFalse(args.solo_prevalidar)
@@ -477,6 +494,8 @@ class TestParser(unittest.TestCase):
         args = parser.parse_args(["--rehacer", "clonacion", "--rehacer", "destino"])
         self.assertEqual(args.rehacer, ["clonacion", "destino"])
         self.assertEqual(run_flujo.pasos_a_rehacer(args.rehacer), {"clonacion", "destino"})
+        self.assertEqual(run_flujo.pasos_efectivos_a_rehacer(["clonacion"]), {"clonacion", "formato", "verificacion", "carga"})
+        self.assertEqual(run_flujo.pasos_efectivos_a_rehacer(["verificacion"]), {"verificacion", "carga"})
         args = parser.parse_args(["--rehacer", "todo"])
         self.assertEqual(run_flujo.pasos_a_rehacer(args.rehacer), set(run_flujo.PASOS))
         with contextlib.redirect_stderr(io.StringIO()):
@@ -501,13 +520,21 @@ class TestParser(unittest.TestCase):
         datos = run_flujo.argumentos_corrida(args, Path("C:/x/RUTAS.xlsx"))
         self.assertEqual(datos["rehacer"], list(run_flujo.PASOS))
         self.assertTrue(datos["forzar_carga"])
-        self.assertEqual(datos["schema"], "fabrica")
+        self.assertEqual(datos["schema"], "fabrica_pruebas")
 
 
 # ---------------------------------------------------------------------------
 # (h) fallos por lote
 # ---------------------------------------------------------------------------
 class TestFallosPorLote(BaseRunFlujo):
+    def test_fallo_de_carga_revierte_un_lote_sigue_con_otro_y_notifica_una_vez(self):
+        excel = self.excel()
+        run_flujo.cargar_lote.side_effect = [RuntimeError("base no disponible"), {"total": 1, "insertados": 1, "existentes": 0}]
+        self.assertEqual(self.correr(excel), 1)
+        self.assertEqual(self.lote(ORIGEN_A)["pasos"]["carga"]["estado"], "fallido")
+        self.assertEqual(self.lote(ORIGEN_B)["pasos"]["carga"]["estado"], "ok")
+        self.assertEqual(run_flujo.enviar_correo.call_count, 1)
+
     def test_h_403_en_un_archivo_deja_el_lote_fallido_y_el_otro_ok(self):
         prohibido = self.fake.agregar_archivo("secreto.pdf", ORIGEN_A, contenido=b"s")
         self.svc = _DriveConCopiaProhibida(self.fake, prohibido, 403)
@@ -521,7 +548,7 @@ class TestFallosPorLote(BaseRunFlujo):
         )
         self.assertEqual(
             self.pasos(ORIGEN_B),
-            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "pendiente"},
+            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "ok"},
         )
         lote_a = self.lote(ORIGEN_A)
         paso = lote_a["pasos"]["clonacion"]
@@ -569,7 +596,7 @@ class TestFallosPorLote(BaseRunFlujo):
         self.assertEqual(self.fake.llamadas["copy"], copias + 1)  # solo lo que faltaba
         self.assertEqual(
             self.pasos(ORIGEN_A),
-            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "pendiente"},
+            {"destino": "ok", "clonacion": "ok", "formato": "ok", "verificacion": "ok", "carga": "ok"},
         )
         lote_a = self.lote(ORIGEN_A)
         self.assertIsNone(lote_a["ultimo_error"])

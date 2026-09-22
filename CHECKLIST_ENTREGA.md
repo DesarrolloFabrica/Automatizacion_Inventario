@@ -4,8 +4,8 @@ Lista de verificación al cierre de cada corrida o lote.
 
 Hay dos formas de ejecutar: el **run único** (`run_flujo.py`, recomendado) y
 los **scripts por módulo** (semántica anterior, vigentes hasta terminar la
-migración). Con el run único, los bloques C, D (inventario y correo 1) y E
-quedan **pendientes de fase 2/3** y no se marcan.
+migración). El run único ya integra conversión, verificación, inventario,
+carga transaccional y un único correo final.
 
 
 --------------------------------------------------
@@ -31,8 +31,8 @@ B. EJECUCIÓN (RUN ÚNICO)
 
 - [ ] Ejecución de `python run_flujo.py --excel "<RUTA>\RUTAS.xlsx"`
 - [ ] Prevalidación sin líneas `ERROR` (los `AVISO` revisados)
-- [ ] Código de salida `0` (todos los lotes con Destino y Clonación en OK)
-- [ ] `corridas/<excel>.estado.xlsx` revisado: columnas Destino y Clonación en verde;
+- [ ] Código de salida `0` (todos los pasos de todos los lotes en OK)
+- [ ] `corridas/<excel>.estado.xlsx` revisado: todos los pasos en verde;
       "Qué pasó" / "Qué hacer" vacías
 - [ ] Carpeta del programa creada (o reutilizada) dentro de la raíz con el nombre exacto del origen
 - [ ] Si hubo lotes fallidos: causa corregida y reejecutado el mismo comando (retoma donde quedó);
@@ -46,7 +46,7 @@ Ejecución por módulos: continuar con las secciones C a E.
 C. CONVERSIÓN JPG → PNG
 --------------------------------------------------
 
-Run único: **pendiente de fase 2** (se hará en el clon, conservando el nombre base).
+Run único: integrado; se hace en el clon conservando el nombre base.
 
 Scripts por módulo:
 
@@ -60,8 +60,7 @@ D. CLONACIÓN + INVENTARIO + CORREO 1
 --------------------------------------------------
 
 Run único: la clonación se valida en el bloque B. Inventario, Sheet y correo 1
-se reemplazan por la verificación origen vs clon y el correo único
-(**pendiente de fase 2/3**).
+se reemplazan por la verificación origen vs clon y el correo único final.
 
 Scripts por módulo:
 
@@ -77,8 +76,9 @@ Scripts por módulo:
 E. CARGA LMS / GCP + CORREO 2
 --------------------------------------------------
 
-Run único: **pendiente de fase 3** (carga al esquema `fabrica` solo de los lotes
-verificados + correo único con el Excel de estado).
+Run único: integrado; carga al esquema `fabrica_pruebas` solo los lotes
+verificados y envía un correo único con el Excel de estado. Producción
+(`fabrica`) se pide a mano con `--schema fabrica`.
 
 Scripts por módulo:
 
@@ -95,8 +95,8 @@ F. EXCLUSIONES DEL FLUJO DIARIO
 --------------------------------------------------
 
 - [ ] No se ejecutó `clonar_esquema_pruebas.py`
-- [ ] Scripts por módulo: no se utilizó `--schema fabrica` salvo autorización expresa
-      (el run único carga a `fabrica` por defecto; decisión ya tomada)
+- [ ] No se utilizó `--schema fabrica` (producción) salvo autorización expresa:
+      mientras se valida el flujo todo va a `fabrica_pruebas`
 - [ ] No se versionaron secretos ni artefactos de corrida (`corridas/` incluido)
 - [ ] No se modificó nada dentro de las carpetas origen
 
@@ -116,10 +116,10 @@ G. CIERRE
 |---|---|---|
 | Preparación | | |
 | Ejecución (run único) | | |
-| Formato | | pendiente de fase 2 en el run único |
+| Formato | | integrado en el run único |
 | Clonación + correo 1 | | |
-| Verificación | | pendiente de fase 2 en el run único |
-| GCP + correo 2 | | pendiente de fase 3 en el run único |
+| Verificación | | integrada en el run único |
+| GCP + correo único | | integrado en el run único |
 | Cierre | | |
 
 **Fecha:** _______________  

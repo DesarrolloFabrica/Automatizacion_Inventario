@@ -355,14 +355,15 @@ def listar_hijos(
 
 def obtener_carpeta(svc, folder_id: str, *, ejecutar=ejecutar, contexto: str = "") -> dict:
     """
-    files().get de una carpeta activa (id, name, mimeType, driveId, trashed).
+    files().get de una carpeta activa (id, name, mimeType, driveId, trashed, parents).
+    `parents` permite deducir el cliente subiendo por la jerarquía sin volver a consultar.
     Si el ID no es una carpeta o Drive falla, lanza ErrorFlujo con frase clara.
     """
     try:
         carpeta = ejecutar(
             svc.files().get(
                 fileId=folder_id,
-                fields="id, name, mimeType, driveId, trashed",
+                fields="id, name, mimeType, driveId, trashed, parents",
                 supportsAllDrives=True,
             )
         )
