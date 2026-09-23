@@ -505,5 +505,53 @@ class TestFakeDrive(unittest.TestCase):
             self.fake.obtener("nada")
 
 
+class TestTokenEnDiscoDeSoloLectura(unittest.TestCase):
+    """
+    En Cloud Run el token se monta como secreto y el montaje es de solo lectura.
+    Renovar la sesión funciona; guardarla no. Eso NO puede tumbar la corrida ni
+    hacerse pasar por un problema de red.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.ruta = Path(self._tmp.name) / "token.json"
+        self.addCleanup(self._tmp.cleanup)
+        # Token con todos los permisos pero vencido: obliga a renovar.
+        self.ruta.write_text(json.dumps({
+            "token": "viejo", "refresh_token": "r", "client_id": "c",
+            "client_secret": "s", "token_uri": "https://oauth2.googleapis.com/token",
+            "scopes": list(drive.SCOPES),
+            "expiry": "2020-01-01T00:00:00Z",
+        }), encoding="utf-8")
+
+    def test_no_poder_guardar_no_impide_usar_la_sesion_renovada(self):
+        renovado = mock.Mock()
+
+        def refrescar(_self, _peticion):  # se parchea como método: recibe self
+            renovado.llamado = True
+
+        with mock.patch.object(drive.Credentials, "refresh", refrescar):
+            with mock.patch.object(
+                drive, "_guardar_token", side_effect=OSError(30, "Read-only file system")
+            ):
+                creds = drive.cargar_credenciales(interactivo=False, ruta_token=self.ruta)
+
+        self.assertIsNotNone(creds)
+        self.assertTrue(renovado.llamado)  # sí se renovó contra Google
+
+    def test_un_fallo_de_red_al_renovar_si_se_reporta_como_tal(self):
+        with mock.patch.object(drive.Credentials, "refresh", side_effect=OSError("sin ruta al host")):
+            with self.assertRaises(ErrorFlujo) as cm:
+                drive.cargar_credenciales(interactivo=False, ruta_token=self.ruta)
+        self.assertIn("No hay conexión con Google", cm.exception.motivo)
+
+    def test_guardar_si_se_puede_devuelve_si_o_no(self):
+        creds = mock.Mock()
+        creds.to_json.return_value = "{}"
+        self.assertTrue(drive._guardar_token_si_se_puede(creds, self.ruta))
+        with mock.patch.object(drive, "_guardar_token", side_effect=OSError("solo lectura")):
+            self.assertFalse(drive._guardar_token_si_se_puede(creds, self.ruta))
+
+
 if __name__ == "__main__":
     unittest.main()

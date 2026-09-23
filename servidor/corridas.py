@@ -231,7 +231,7 @@ class Gestor:
             trabajo = Trabajo(
                 id=self._nuevo_id(),
                 lotes=lotes,
-                simular=self.cfg.simular_por_defecto if simular is None else bool(simular),
+                simular=self._simular(simular),
                 forzar_carga=(
                     self.cfg.forzar_carga_por_defecto if forzar_carga is None else bool(forzar_carga)
                 ),
@@ -241,6 +241,16 @@ class Gestor:
             self._orden.insert(0, trabajo.id)
         self._cola.put(trabajo.id)
         return trabajo
+
+    def _simular(self, pedido: bool | None) -> bool:
+        """
+        Qué modo se usa. Con `simular_forzado` el despliegue manda y lo que pida
+        la página da igual: es la forma de publicar el servicio cuando todavía no
+        debe escribir en la base ni enviar correo.
+        """
+        if getattr(self.cfg, "simular_forzado", False):
+            return True
+        return self.cfg.simular_por_defecto if pedido is None else bool(pedido)
 
     def obtener(self, corrida_id: str) -> Trabajo | None:
         with self._lock:
@@ -273,6 +283,7 @@ class Gestor:
             "esquema": self.cfg.schema,
             "produccion": self.cfg.es_produccion,
             "simular_por_defecto": self.cfg.simular_por_defecto,
+            "simular_forzado": getattr(self.cfg, "simular_forzado", False),
             "almacen": self.cfg.almacen or str(self.cfg.dir_corridas),
         }
 

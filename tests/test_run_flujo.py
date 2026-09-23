@@ -640,7 +640,8 @@ class TestFallosPorLote(BaseRunFlujo):
         self.assertEqual(self.pasos(ORIGEN_B)["clonacion"], "fallido")  # ambos lotes pasaron por el paso
         self.assertEqual(self.estado()["corridas"][0]["resultado"], "fallido")
         texto_log = self.logs()[0].read_text(encoding="utf-8")
-        self.assertIn("detalle: RuntimeError('boom')", texto_log)  # el detalle técnico va al archivo
+        # El detalle técnico va al registro, nunca a la página ni al correo.
+        self.assertIn("detalle técnico: RuntimeError('boom')", texto_log)
         self.assertNotIn("RuntimeError", self.salida.getvalue())  # pero no a la consola
 
     def test_excel_de_estado_abierto_no_cambia_el_codigo_de_salida(self):

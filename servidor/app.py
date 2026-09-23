@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from flujo_lib import certificados, drive
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion
 from flujo_lib.prevalidacion import cargar_env
-from servidor import configuracion
+from servidor import configuracion, registro
 from servidor.corridas import Gestor, construir_lote
 
 ESTATICOS = Path(__file__).resolve().parent / "static"
@@ -61,6 +61,9 @@ def _error(codigo: int, err: ErrorFlujo) -> JSONResponse:
 
 def crear_app(cfg=None, gestor: Gestor | None = None) -> FastAPI:
     """Construye la aplicación. cfg y gestor se inyectan en las pruebas."""
+    # Lo primero: que todo lo que pase se vea en los registros del servidor.
+    # Sin esto el contenedor es mudo y un fallo en el despliegue no deja rastro.
+    registro.configurar()
     # En los equipos de la CUN el antivirus inspecciona el tráfico seguro: hay que
     # reconocer sus certificados antes de la primera llamada a Google. Fuera de
     # Windows (Cloud Run) no hace nada.
@@ -105,7 +108,9 @@ def crear_app(cfg=None, gestor: Gestor | None = None) -> FastAPI:
                 creds = configuracion.cargar_credenciales(cfg)
                 app.state.cuenta = drive.quien_soy(drive.construir_servicio(creds))
             except Exception as e:
-                logger.warning("No se pudo saber la cuenta de Google: %r", e)
+                logger.warning(
+                    "No se pudo saber la cuenta de Google: %s: %s", type(e).__name__, e
+                )
                 app.state.cuenta = ""
         return gestor.salud(cuenta=app.state.cuenta or None)
 

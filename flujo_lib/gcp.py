@@ -132,12 +132,29 @@ def _borrar_programas(cur, schema: str, programas: list[str]) -> int:
 
 
 def conectar_desde_env(env=os.environ):
+    """
+    Conexión a Cloud SQL con los datos del entorno.
+
+    El cifrado se exige por defecto (`DB_SSLMODE=require`) porque el servicio
+    puede conectarse por la IP pública de la instancia, y entonces el tráfico
+    sale a internet. Por el socket de Cloud SQL el cifrado sobra pero no
+    estorba: psycopg2 lo ignora en conexiones locales por socket.
+    """
     import psycopg2
-    return psycopg2.connect(
-        host=env.get("DB_HOST"), port=int(env.get("DB_PORT", "5432")),
-        dbname=env.get("DB_NAME"), user=env.get("DB_USER"),
-        password=env.get("DB_PASSWORD"), connect_timeout=30,
-    )
+
+    parametros = {
+        "host": env.get("DB_HOST"),
+        "port": int(env.get("DB_PORT", "5432")),
+        "dbname": env.get("DB_NAME"),
+        "user": env.get("DB_USER"),
+        "password": env.get("DB_PASSWORD"),
+        "connect_timeout": int(env.get("DB_TIMEOUT", "30")),
+    }
+    sslmode = (env.get("DB_SSLMODE") or "require").strip()
+    # Por socket Unix no hay TLS que negociar; exigirlo haría fallar la conexión.
+    if sslmode and not str(parametros["host"] or "").startswith("/"):
+        parametros["sslmode"] = sslmode
+    return psycopg2.connect(**parametros)
 
 
 def cargar_lote(

@@ -12,7 +12,7 @@ Nada de este módulo habla con Google al importarse; solo al llamar funciones.
 
 from __future__ import annotations
 
-import http.client, json, os, random, re, socket, ssl, tempfile, time
+import http.client, json, logging, os, random, re, socket, ssl, tempfile, time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -26,6 +26,8 @@ from googleapiclient.errors import HttpError
 
 from . import ROOT
 from .mensajes import ErrorFlujo, traducir_excepcion
+
+logger = logging.getLogger(__name__)
 
 RUTA_CREDENCIALES = ROOT / "credentials.json"
 RUTA_TOKEN = ROOT / "token.json"
@@ -93,6 +95,24 @@ def _scopes_completos(datos: dict | None) -> bool:
     if isinstance(scopes, str):
         scopes = scopes.split()
     return set(SCOPES) <= set(scopes)
+
+
+def _guardar_token_si_se_puede(creds: Credentials, ruta_token: Path) -> bool:
+    """
+    Intenta persistir el token renovado. Devuelve False si no se pudo.
+
+    Guardar es una comodidad, no un requisito: las credenciales ya están vivas
+    en memoria. En el servicio desplegado el token se monta como secreto y el
+    montaje es de SOLO LECTURA, así que este guardado siempre falla ahí; si eso
+    cortara la corrida, el flujo sería inservible en la nube. El coste de no
+    guardar es volver a renovar en la siguiente corrida.
+    """
+    try:
+        _guardar_token(creds, ruta_token)
+        return True
+    except OSError as e:
+        logger.debug("No se pudo guardar el token renovado en %s: %r", ruta_token, e)
+        return False
 
 
 def _guardar_token(creds: Credentials, ruta_token: Path) -> None:
@@ -211,8 +231,6 @@ def cargar_credenciales(
             elif creds.expired and creds.refresh_token:
                 try:
                     creds.refresh(Request())
-                    _guardar_token(creds, ruta_token)
-                    return creds
                 except RefreshError as e:
                     detalle = f"Google no renovó la sesión: {e!r}"
                 except (TransportError, OSError) as e:
@@ -222,6 +240,11 @@ def cargar_credenciales(
                         paso="token",
                         detalle=repr(e),
                     ) from e
+                else:
+                    # El guardado va aparte y no puede tumbar la corrida: donde el
+                    # token se monta como secreto, el disco es de solo lectura.
+                    _guardar_token_si_se_puede(creds, ruta_token)
+                    return creds
             else:
                 detalle = "El token venció y no se puede renovar solo."
     if not interactivo:

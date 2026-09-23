@@ -37,6 +37,7 @@ class Configuracion:
     almacen: str  # "gs://bucket/prefijo" o una ruta; vacío = solo disco local
     dir_corridas: Path
     simular_por_defecto: bool
+    simular_forzado: bool
     forzar_carga_por_defecto: bool
     modo_credenciales: str
     ruta_token: Path
@@ -46,6 +47,7 @@ class Configuracion:
     @property
     def es_produccion(self) -> bool:
         return self.schema == "fabrica"
+
 
 
 def cargar(env: Mapping[str, str] | None = None) -> Configuracion:
@@ -69,6 +71,10 @@ def cargar(env: Mapping[str, str] | None = None) -> Configuracion:
         almacen=almacen,
         dir_corridas=Path((env.get("DIR_CORRIDAS") or str(ROOT / "corridas")).strip()),
         simular_por_defecto=_verdadero(env.get("SIMULAR_POR_DEFECTO"), True),
+        # Modo prueba impuesto por el despliegue: la página no puede apagarlo.
+        # Sirve para publicar el servicio cuando todavía no puede escribir en la
+        # base (por ejemplo, sin permiso de Cloud SQL) sin que nadie lo intente.
+        simular_forzado=_verdadero(env.get("SIMULAR_FORZADO"), False),
         forzar_carga_por_defecto=_verdadero(env.get("FORZAR_CARGA_POR_DEFECTO"), False),
         modo_credenciales=modo,
         ruta_token=Path((env.get("GOOGLE_TOKEN_JSON") or str(drive.RUTA_TOKEN)).strip()),

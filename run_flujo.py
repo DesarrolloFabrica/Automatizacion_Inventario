@@ -226,12 +226,18 @@ def cerrar_logging(handlers: list[logging.Handler]) -> None:
 
 
 def imprimir_hallazgos(res: ResultadoPrevalidacion) -> None:
-    """Una línea por hallazgo ("OK ", "AVISO ", "ERROR " + mensaje + acción); el detalle solo al archivo."""
+    """
+    Una línea por hallazgo ("OK ", "AVISO ", "ERROR " + mensaje + acción).
+
+    El detalle técnico va a nivel depuración: en la terminal queda solo en el
+    archivo de la corrida, y el servicio web escucha ese nivel para que en los
+    registros del servidor sí se vea. Nunca llega a la página ni al correo.
+    """
     logging.info("Resultado de la prevalidación:")
     for h in res.hallazgos:
         logging.log(_NIVEL_HALLAZGO.get(h.nivel, logging.INFO), h.texto())
         if h.detalle:
-            logging.debug("    detalle: %s", h.detalle)
+            logging.debug("    detalle técnico (%s): %s", h.area, h.detalle)
 
 
 def imprimir_resumen(estado: EstadoCorrida, lotes: list[Lote]) -> None:
@@ -297,7 +303,7 @@ def _fallar_paso(estado: EstadoCorrida, lote: Lote, paso: str, err: ErrorFlujo) 
     """Marca el paso como fallido y los siguientes como omitidos; lo cuenta en el log."""
     logging.error("Lote «%s»: %s", lote.etiqueta, err)
     if err.detalle:
-        logging.debug("    detalle: %s", err.detalle)
+        logging.debug("    detalle técnico: %s", err.detalle)
     estado.marcar(
         lote.clave, paso, "fallido", motivo=err.motivo, accion=err.accion, detalle=err.detalle
     )
@@ -667,7 +673,7 @@ def ejecutar_corrida(
     except Exception as e:
         err = traducir_excepcion(e, paso="flujo")
         logging.error("%s", err)
-        logging.debug("    detalle: %s", err.detalle)
+        logging.debug("    detalle técnico: %s", err.detalle)
         _cerrar_sin_fallar(estado, "fallido")
         exportar_estado(estado)
         imprimir_rutas(estado, ruta_log, None)
@@ -695,7 +701,7 @@ def ejecutar_corrida(
             correo_ok = False
             err = traducir_excepcion(e, paso="correo", contexto="el correo final")
             logging.error("No se pudo enviar el correo final. %s", err)
-            logging.debug("    detalle: %s", err.detalle)
+            logging.debug("    detalle técnico: %s", err.detalle)
             estado.cerrar_corrida("fallido_notificacion")
     logging.info("=" * 60)
     imprimir_resumen(estado, res.lotes)

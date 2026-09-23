@@ -37,7 +37,7 @@ ENV_OK = {
 def configuracion_de_prueba(carpeta: Path, **kw) -> Configuracion:
     base = dict(
         schema="fabrica_pruebas", almacen="", dir_corridas=carpeta,
-        simular_por_defecto=True, forzar_carga_por_defecto=False,
+        simular_por_defecto=True, simular_forzado=False, forzar_carga_por_defecto=False,
         modo_credenciales="token", ruta_token=carpeta / "token.json",
         ruta_cuenta_servicio=None, usuario_suplantado="",
     )
@@ -148,6 +148,23 @@ class TestGestor(unittest.TestCase):
         with self.assertRaises(ErrorFlujo) as cm:
             g.lanzar(lotes=lotes)
         self.assertIn("más de una vez", cm.exception.motivo)
+
+    def test_modo_prueba_impuesto_por_el_despliegue(self):
+        """
+        Con SIMULAR_FORZADO el despliegue manda: la página puede pedir una
+        corrida real y aun así no se escribe en la base ni se envía correo.
+        Es lo que permite publicar el servicio sin acceso a Cloud SQL.
+        """
+        self.cfg = configuracion_de_prueba(self.dir, simular_forzado=True)
+        g = self.gestor()
+        trabajo = g.lanzar(origen=URL_ORIGEN, destino=URL_RAIZ, simular=False)
+        self.assertTrue(trabajo.simular)
+        self.assertTrue(g.salud()["simular_forzado"])
+
+    def test_sin_imponer_la_pagina_decide(self):
+        g = self.gestor()
+        self.assertFalse(g.lanzar(origen=URL_ORIGEN, destino=URL_RAIZ, simular=False).simular)
+        self.assertFalse(g.salud()["simular_forzado"])
 
     def test_terminada_libera_el_origen(self):
         g = self.gestor()

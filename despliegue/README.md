@@ -788,6 +788,41 @@ gcloud run services update-traffic fabrica-contenido-web --region=<REGION> `
 
 ---
 
+## 10 bis. Comprobar los permisos de la cuenta de servicio
+
+Un despliegue que arranca bien pero falla al conectarse a la base o a Google casi
+siempre es esto: la cuenta de servicio quedó sin los roles necesarios. Se
+comprueba en un comando:
+
+```powershell
+gcloud projects get-iam-policy <PROYECTO> `
+  --flatten="bindings[].members" `
+  --filter="bindings.members:<CUENTA_SERVICIO>" `
+  --format="value(bindings.role)"
+```
+
+Si no devuelve nada, la cuenta no tiene ningún rol en el proyecto y hay que
+dárselos. El mínimo es:
+
+```powershell
+gcloud projects add-iam-policy-binding <PROYECTO> `
+  --member="serviceAccount:<CUENTA_SERVICIO>" --role="roles/cloudsql.client"
+
+gcloud projects add-iam-policy-binding <PROYECTO> `
+  --member="serviceAccount:<CUENTA_SERVICIO>" --role="roles/secretmanager.secretAccessor"
+
+gcloud storage buckets add-iam-policy-binding gs://<BUCKET_ESTADO> `
+  --member="serviceAccount:<CUENTA_SERVICIO>" --role="roles/storage.objectAdmin"
+```
+
+Sin `roles/cloudsql.client` el socket de Cloud SQL está montado pero la conexión
+se rechaza, y el mensaje que se ve es «No se pudo conectar a la base de datos».
+
+Los permisos sobre el bucket y sobre los secretos se pueden haber concedido en
+el propio recurso en vez de en el proyecto; en ese caso no aparecen en la
+consulta de arriba aunque funcionen. El de Cloud SQL sí es de proyecto.
+
+
 ## 11. Problemas frecuentes
 
 | Qué ves | Qué pasa | Cómo se arregla |
