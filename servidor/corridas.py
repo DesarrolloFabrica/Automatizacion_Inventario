@@ -36,7 +36,9 @@ ESTADOS_TERMINADOS = {"ok", "con_pendientes", "fallido", "fallido_prevalidacion"
 _CLIENTES_VALIDOS = "PRODUCTO, TANIA o LMS_correcciones"
 
 
-def construir_lote(origen: str, destino: str, etiqueta: str, cliente: str) -> Lote:
+def construir_lote(
+    origen: str, destino: str, etiqueta: str, cliente: str, *, fila: int = 1
+) -> Lote:
     """
     Arma el lote desde el formulario, con las mismas validaciones del Excel.
     `cliente` vacío deja el lote sin clasificar: la prevalidación lo deduce de Drive.
@@ -75,7 +77,7 @@ def construir_lote(origen: str, destino: str, etiqueta: str, cliente: str) -> Lo
         cliente_gcp, raiz_gcp = CLASIFICACIONES[clasificacion]
 
     return Lote(
-        fila=1,
+        fila=fila,
         etiqueta=(etiqueta or "").strip() or "Lote sin nombre",
         cliente_excel=(cliente or "").strip(),
         clasificacion=clasificacion,
@@ -93,7 +95,7 @@ class Trabajo:
     """Una corrida pedida desde la web, con lo que la página necesita mostrar."""
 
     id: str
-    lote: Lote
+    lotes: list[Lote]
     simular: bool
     forzar_carga: bool
     creado: str
@@ -110,6 +112,11 @@ class Trabajo:
     @property
     def terminado(self) -> bool:
         return self.estado_general in ESTADOS_TERMINADOS
+
+    @property
+    def lote(self) -> Lote:
+        """Primer lote, conservado para los textos y clientes web antiguos."""
+        return self.lotes[0]
 
 
 class _Bitacora(logging.Handler):
@@ -178,24 +185,52 @@ class Gestor:
             self.procesar(corrida_id)
 
     # ----- API que usa la web ---------------------------------------------
-    def lanzar(self, *, origen: str, destino: str, etiqueta: str = "",
-               cliente: str = "", simular: bool | None = None,
-               forzar_carga: bool | None = None) -> Trabajo:
+    def lanzar(
+        self,
+        *,
+        origen: str = "",
+        destino: str = "",
+        etiqueta: str = "",
+        cliente: str = "",
+        simular: bool | None = None,
+        forzar_carga: bool | None = None,
+        lotes: list[Lote] | None = None,
+    ) -> Trabajo:
         """Encola una corrida nueva. Lanza ErrorFlujo si los datos no sirven."""
-        lote = construir_lote(origen, destino, etiqueta, cliente)
-        with self._lock:
-            encurso = self._en_curso_para(lote.origen_id)
-            if encurso is not None:
+        lotes = list(lotes) if lotes is not None else [
+            construir_lote(origen, destino, etiqueta, cliente)
+        ]
+        if not lotes:
+            raise ErrorFlujo(
+                "No hay carpetas para procesar.",
+                "Agrega por lo menos una fila con origen y destino.",
+                paso="formulario",
+            )
+
+        origenes_vistos: set[str] = set()
+        for lote in lotes:
+            if lote.origen_id in origenes_vistos:
                 raise ErrorFlujo(
-                    f"Ya hay una corrida en marcha para esa carpeta de origen "
-                    f"(«{encurso.lote.etiqueta}»).",
-                    "Espera a que termine o ábrela para ver cómo va.",
+                    "Una carpeta de origen aparece más de una vez en la misma corrida.",
+                    "Elimina la fila repetida y vuelve a pulsar Ejecutar.",
                     paso="formulario",
-                    detalle=encurso.id,
                 )
+            origenes_vistos.add(lote.origen_id)
+
+        with self._lock:
+            for lote in lotes:
+                encurso = self._en_curso_para(lote.origen_id)
+                if encurso is not None:
+                    raise ErrorFlujo(
+                        f"Ya hay una corrida en marcha para esa carpeta de origen "
+                        f"(«{encurso.lote.etiqueta}»).",
+                        "Espera a que termine o ábrela para ver cómo va.",
+                        paso="formulario",
+                        detalle=encurso.id,
+                    )
             trabajo = Trabajo(
                 id=self._nuevo_id(),
-                lote=lote,
+                lotes=lotes,
                 simular=self.cfg.simular_por_defecto if simular is None else bool(simular),
                 forzar_carga=(
                     self.cfg.forzar_carga_por_defecto if forzar_carga is None else bool(forzar_carga)
@@ -296,7 +331,7 @@ class Gestor:
 
         codigo = run_flujo.ejecutar_corrida(
             args, nombre, estado, ruta_log,
-            lotes=[trabajo.lote],
+            lotes=trabajo.lotes,
             reporte=reporte,
             cargar_credenciales=lambda **_kw: config_mod.cargar_credenciales(self.cfg),
             cancelado=trabajo.cancelacion.is_set,
@@ -321,7 +356,9 @@ class Gestor:
     def _en_curso_para(self, origen_id: str) -> Trabajo | None:
         for corrida_id in self._orden:
             trabajo = self._trabajos[corrida_id]
-            if not trabajo.terminado and trabajo.lote.origen_id == origen_id:
+            if not trabajo.terminado and any(
+                lote.origen_id == origen_id for lote in trabajo.lotes
+            ):
                 return trabajo
         return None
 
@@ -332,7 +369,9 @@ class Gestor:
     @staticmethod
     def _enlaces_de(estado: EstadoCorrida, trabajo: Trabajo) -> dict:
         inventario = estado.datos.get("inventario") or {}
-        destino_id, _ = estado.destino_de(trabajo.lote.clave)
+        destino_id = None
+        if len(trabajo.lotes) == 1:
+            destino_id, _ = estado.destino_de(trabajo.lote.clave)
         return {
             "destino": f"https://drive.google.com/drive/folders/{destino_id}" if destino_id else None,
             "sheet": inventario.get("sheet") or None,
@@ -349,17 +388,26 @@ class Gestor:
 
     def _resumen_final(self, estado: EstadoCorrida, trabajo: Trabajo) -> dict:
         general = trabajo.estado_general
-        lote = estado.datos.get("lotes", {}).get(trabajo.lote.clave) or {}
-        error = lote.get("ultimo_error") or {}
+        datos_lotes = estado.datos.get("lotes", {})
+        errores = [
+            (datos_lotes.get(lote.clave) or {}).get("ultimo_error") or {}
+            for lote in trabajo.lotes
+        ]
+        error = next((item for item in errores if item), {})
+        cantidad = len(trabajo.lotes)
         if general == "ok":
             return {
-                "motivo": "El lote quedó clonado, verificado y registrado.",
+                "motivo": (
+                    "La carpeta quedó clonada, verificada y registrada."
+                    if cantidad == 1
+                    else f"Las {cantidad} carpetas quedaron clonadas, verificadas y registradas."
+                ),
                 "accion": "Revisa el inventario si quieres el detalle por materia.",
             }
         if general == "con_pendientes":
             return {
-                "motivo": "El lote terminó con diferencias y no se cargó a la base.",
-                "accion": "Abre el inventario para ver qué falta y vuelve a ejecutarlo cuando esté corregido.",
+                "motivo": "Una o más carpetas terminaron con diferencias y no se cargaron a la base.",
+                "accion": "Abre el inventario para ver qué falta y vuelve a ejecutarlas cuando esté corregido.",
             }
         if general == "fallido_prevalidacion":
             return {
@@ -372,12 +420,15 @@ class Gestor:
         }
 
     def _resumen_corto(self, trabajo: Trabajo) -> dict:
+        etiqueta = trabajo.lote.etiqueta
+        if len(trabajo.lotes) > 1:
+            etiqueta = f"{etiqueta} · {len(trabajo.lotes)} carpetas"
         return {
             "id": trabajo.id,
             "inicio": trabajo.inicio or trabajo.creado,
             "fin": trabajo.fin,
             "estado": trabajo.estado_general,
-            "etiqueta": trabajo.lote.etiqueta,
+            "etiqueta": etiqueta,
         }
 
     def _como_json(self, trabajo: Trabajo) -> dict:
@@ -399,21 +450,24 @@ class Gestor:
         vacio = {"estado": "pendiente", "detalle": "",
                  "progreso": {"hechos": 0, "total": 0, "mensaje": "", "porcentaje": 0}}
         if trabajo.estado is None:
-            pasos = {p: dict(vacio) for p in PASOS}
-            return [{
-                "clave": trabajo.lote.clave,
-                "etiqueta": trabajo.lote.etiqueta,
-                "cliente": trabajo.lote.cliente_excel or trabajo.lote.clasificacion or "",
-                "destino_nombre": None,
-                "destino_enlace": None,
-                "pasos": pasos,
-            }]
+            return [
+                {
+                    "clave": lote.clave,
+                    "etiqueta": lote.etiqueta,
+                    "cliente": lote.cliente_excel or lote.clasificacion or "",
+                    "destino_nombre": None,
+                    "destino_enlace": None,
+                    "pasos": {p: dict(vacio) for p in PASOS},
+                }
+                for lote in trabajo.lotes
+            ]
         salida = []
+        etiquetas = {lote.clave: lote.etiqueta for lote in trabajo.lotes}
         for fila in trabajo.estado.resumen():
             destino_id = fila.get("destino_id")
             salida.append({
                 "clave": fila["clave"],
-                "etiqueta": fila.get("etiqueta") or trabajo.lote.etiqueta,
+                "etiqueta": fila.get("etiqueta") or etiquetas.get(fila["clave"], "Carpeta"),
                 "cliente": fila.get("cliente") or "",
                 "destino_nombre": fila.get("destino_nombre"),
                 "destino_enlace": (

@@ -58,6 +58,7 @@
   var seguirAlFinal = true; // se desactiva si el usuario sube a leer la consola
   var confirmandoCancelacion = false;
   var relojConfirmacion = null;
+  var contadorFilas = 0;
   // Nodos ya creados por lote: se actualizan en sitio en vez de repintarse.
   // Repintar entero cada 2 s haría que el lector de pantalla releyese todo.
   var nodosPorLote = {};
@@ -173,15 +174,65 @@
     cajaError.hidden = true;
   }
 
+  function filasDeRutas() {
+    return Array.prototype.slice.call($('filas-rutas').querySelectorAll('.rutas__fila'));
+  }
+
+  function actualizarBotonesQuitar() {
+    var filas = filasDeRutas();
+    filas.forEach(function (fila) {
+      fila.querySelector('[data-accion="quitar"]').hidden = filas.length === 1;
+    });
+  }
+
+  function crearFilaRuta(valores) {
+    contadorFilas += 1;
+    var fragmento = $('plantilla-fila-ruta').content.cloneNode(true);
+    var fila = fragmento.querySelector('.rutas__fila');
+    var origen = fila.querySelector('[data-campo="origen"]');
+    var destino = fila.querySelector('[data-campo="destino"]');
+    var errorOrigen = fila.querySelector('[data-error="origen"]');
+    var errorDestino = fila.querySelector('[data-error="destino"]');
+
+    origen.id = 'campo-origen-' + contadorFilas;
+    destino.id = 'campo-destino-' + contadorFilas;
+    errorOrigen.id = 'error-origen-' + contadorFilas;
+    errorDestino.id = 'error-destino-' + contadorFilas;
+    fila.querySelector('[data-etiqueta="origen"]').setAttribute('for', origen.id);
+    fila.querySelector('[data-etiqueta="destino"]').setAttribute('for', destino.id);
+    origen.setAttribute('aria-describedby', errorOrigen.id);
+    destino.setAttribute('aria-describedby', errorDestino.id);
+    origen.value = valores && valores.origen ? valores.origen : '';
+    destino.value = valores && valores.destino ? valores.destino : '';
+
+    [
+      [origen, errorOrigen],
+      [destino, errorDestino]
+    ].forEach(function (par) {
+      par[0].addEventListener('blur', function () {
+        if (this.value.trim()) { validarCampoCarpeta(this, par[1]); }
+      });
+      par[0].addEventListener('input', function () { limpiarError(this, par[1]); });
+    });
+
+    fila.querySelector('[data-accion="quitar"]').addEventListener('click', function () {
+      fila.remove();
+      actualizarBotonesQuitar();
+    });
+    $('filas-rutas').appendChild(fragmento);
+    actualizarBotonesQuitar();
+    return origen;
+  }
+
   /* ----------------------------------------------------------------------
      Memoria local de las últimas rutas
      Va envuelto en try/catch porque en algunos equipos de la CUN el
      almacenamiento del navegador está restringido y lanzaría excepción.
      ---------------------------------------------------------------------- */
 
-  function guardarRutas(origen, destino) {
+  function guardarRutas(lotes) {
     try {
-      window.localStorage.setItem(CLAVE_ALMACEN, JSON.stringify({ origen: origen, destino: destino }));
+      window.localStorage.setItem(CLAVE_ALMACEN, JSON.stringify({ lotes: lotes }));
     } catch (e) { /* sin memoria local se sigue trabajando igual */ }
   }
 
@@ -314,20 +365,43 @@
 
   function manejarEnvio(evento) {
     evento.preventDefault();
-
-    var entradaOrigen = $('campo-origen');
-    var entradaDestino = $('campo-destino');
-
-    var okOrigen = validarCampoCarpeta(entradaOrigen, $('error-origen'));
-    var okDestino = validarCampoCarpeta(entradaDestino, $('error-destino'));
-
     var cajaEnvio = $('error-envio');
     cajaEnvio.hidden = true;
 
-    if (!okOrigen || !okDestino) {
-      // El foco va al primer campo con problema: quien navega con teclado
-      // no tiene que buscar dónde está el error.
-      (okOrigen ? entradaDestino : entradaOrigen).focus();
+    var lotes = [];
+    var primeraInvalida = null;
+    filasDeRutas().forEach(function (fila) {
+      var entradaOrigen = fila.querySelector('[data-campo="origen"]');
+      var entradaDestino = fila.querySelector('[data-campo="destino"]');
+      var textoOrigen = entradaOrigen.value.trim();
+      var textoDestino = entradaDestino.value.trim();
+      var errorOrigen = fila.querySelector('[data-error="origen"]');
+      var errorDestino = fila.querySelector('[data-error="destino"]');
+
+      // Una fila completamente vacía es solo espacio disponible: no se envía.
+      if (!textoOrigen && !textoDestino) {
+        limpiarError(entradaOrigen, errorOrigen);
+        limpiarError(entradaDestino, errorDestino);
+        return;
+      }
+
+      var okOrigen = validarCampoCarpeta(entradaOrigen, errorOrigen);
+      var okDestino = validarCampoCarpeta(entradaDestino, errorDestino);
+      if (!okOrigen || !okDestino) {
+        primeraInvalida = primeraInvalida || (okOrigen ? entradaDestino : entradaOrigen);
+        return;
+      }
+      lotes.push({ origen: textoOrigen, destino: textoDestino });
+    });
+
+    if (primeraInvalida) {
+      primeraInvalida.focus();
+      return;
+    }
+    if (!lotes.length) {
+      cajaEnvio.textContent = 'Agrega por lo menos una fila con carpeta de origen y destino.';
+      cajaEnvio.hidden = false;
+      filasDeRutas()[0].querySelector('[data-campo="origen"]').focus();
       return;
     }
 
@@ -335,15 +409,14 @@
     var cliente = $('campo-cliente').value;
 
     var cuerpo = {
-      origen: entradaOrigen.value.trim(),
-      destino: entradaDestino.value.trim(),
+      lotes: lotes,
       etiqueta: etiqueta ? etiqueta : null,
       cliente: cliente ? cliente : null,
-      simular: $('campo-simular').checked,
-      forzar_carga: $('campo-forzar').checked
+      simular: false,
+      forzar_carga: false
     };
 
-    guardarRutas(cuerpo.origen, cuerpo.destino);
+    guardarRutas(lotes);
 
     var boton = $('boton-ejecutar');
     boton.disabled = true;
@@ -876,19 +949,16 @@
   function iniciar() {
     $('formulario').addEventListener('submit', manejarEnvio);
 
-    // Se revalida al salir del campo, no mientras se escribe: marcar en rojo
-    // un enlace a medio pegar sería molesto.
-    $('campo-origen').addEventListener('blur', function () {
-      if (this.value.trim()) { validarCampoCarpeta(this, $('error-origen')); }
-    });
-    $('campo-destino').addEventListener('blur', function () {
-      if (this.value.trim()) { validarCampoCarpeta(this, $('error-destino')); }
-    });
-    $('campo-origen').addEventListener('input', function () {
-      limpiarError(this, $('error-origen'));
-    });
-    $('campo-destino').addEventListener('input', function () {
-      limpiarError(this, $('error-destino'));
+    var rutas = recuperarRutas();
+    var guardadas = rutas && Array.isArray(rutas.lotes) ? rutas.lotes : [];
+    // Compatibilidad con la versión anterior, que guardaba un solo par.
+    if (!guardadas.length && rutas && (rutas.origen || rutas.destino)) {
+      guardadas = [{ origen: rutas.origen || '', destino: rutas.destino || '' }];
+    }
+    (guardadas.length ? guardadas : [{}]).forEach(crearFilaRuta);
+
+    $('boton-agregar-fila').addEventListener('click', function () {
+      crearFilaRuta({}).focus();
     });
 
     $('boton-nueva').addEventListener('click', function () {
@@ -896,18 +966,12 @@
       idCorrida = null;
       mostrarVista('formulario');
       cargarHistorial();
-      $('campo-origen').focus();
+      filasDeRutas()[0].querySelector('[data-campo="origen"]').focus();
     });
 
     $('boton-cancelar').addEventListener('click', manejarCancelacion);
 
     vigilarDesplazamiento();
-
-    var rutas = recuperarRutas();
-    if (rutas) {
-      if (rutas.origen) { $('campo-origen').value = rutas.origen; }
-      if (rutas.destino) { $('campo-destino').value = rutas.destino; }
-    }
 
     if (MODO_DEMO) {
       $('pie-modo').textContent = 'Modo demostración: los datos son inventados y no se toca Drive ' +
@@ -1231,7 +1295,9 @@
       crearCorrida: function (cuerpo) {
         // Atajo para revisar cómo se ve un rechazo del servidor sin backend:
         // basta con escribir "sinacceso" en cualquiera de los dos enlaces.
-        var texto = (cuerpo.origen || '') + ' ' + (cuerpo.destino || '');
+        var texto = (cuerpo.lotes || []).map(function (lote) {
+          return (lote.origen || '') + ' ' + (lote.destino || '');
+        }).join(' ');
         if (texto.indexOf('sinacceso') !== -1) {
           return responder(null).then(function () {
             var error = new Error('demo 409');

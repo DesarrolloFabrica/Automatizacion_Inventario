@@ -28,17 +28,26 @@ from flujo_lib import certificados, drive
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion
 from flujo_lib.prevalidacion import cargar_env
 from servidor import configuracion
-from servidor.corridas import Gestor
+from servidor.corridas import Gestor, construir_lote
 
 ESTATICOS = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
 
 
+class PeticionLote(BaseModel):
+    """Una fila origen-destino del formulario."""
+
+    origen: str = ""
+    destino: str = ""
+
+
 class PeticionCorrida(BaseModel):
     """Lo que manda el formulario de la página."""
 
-    origen: str = Field(min_length=1)
-    destino: str = Field(min_length=1)
+    # `origen` y `destino` conservan compatibilidad con clientes anteriores.
+    origen: str | None = None
+    destino: str | None = None
+    lotes: list[PeticionLote] = Field(default_factory=list)
     etiqueta: str | None = None
     cliente: str | None = None
     simular: bool | None = None
@@ -76,6 +85,14 @@ def crear_app(cfg=None, gestor: Gestor | None = None) -> FastAPI:
     app.state.gestor = gestor
     app.state.cuenta = None
 
+    @app.middleware("http")
+    async def evitar_estaticos_desactualizados(peticion, continuar):
+        """Evita mezclar HTML nuevo con JS o CSS guardados por el navegador."""
+        respuesta = await continuar(peticion)
+        if peticion.url.path in {"/", "/index.html", "/app.js", "/estilos.css"}:
+            respuesta.headers["Cache-Control"] = "no-store, max-age=0"
+        return respuesta
+
     # ----- API -------------------------------------------------------------
     @app.get("/api/salud")
     def salud() -> dict:
@@ -95,11 +112,35 @@ def crear_app(cfg=None, gestor: Gestor | None = None) -> FastAPI:
     @app.post("/api/corridas", status_code=201)
     def lanzar(peticion: PeticionCorrida):
         try:
+            filas = list(peticion.lotes)
+            if not filas and (peticion.origen is not None or peticion.destino is not None):
+                filas = [PeticionLote(origen=peticion.origen or "", destino=peticion.destino or "")]
+
+            lotes = []
+            for numero, fila in enumerate(filas, start=1):
+                origen = fila.origen.strip()
+                destino = fila.destino.strip()
+                if not origen and not destino:
+                    continue
+                if not origen or not destino:
+                    falta = "origen" if not origen else "destino"
+                    raise ErrorFlujo(
+                        f"La fila {numero} no tiene carpeta de {falta}.",
+                        "Completa los dos enlaces o elimina esa fila.",
+                        paso="formulario",
+                    )
+                lotes.append(
+                    construir_lote(
+                        origen,
+                        destino,
+                        peticion.etiqueta or "",
+                        peticion.cliente or "",
+                        fila=numero,
+                    )
+                )
+
             trabajo = gestor.lanzar(
-                origen=peticion.origen,
-                destino=peticion.destino,
-                etiqueta=peticion.etiqueta or "",
-                cliente=peticion.cliente or "",
+                lotes=lotes,
                 simular=peticion.simular,
                 forzar_carga=peticion.forzar_carga,
             )

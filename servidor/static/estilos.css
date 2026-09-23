@@ -173,6 +173,83 @@ body {
   background: var(--rojo-claro);
 }
 
+.rutas {
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+
+.rutas__nota { margin-bottom: 10px; }
+
+.rutas__filas {
+  display: grid;
+  gap: 10px;
+}
+
+.rutas__fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  background: #fafbfc;
+}
+
+.campo--ruta { margin: 0; }
+
+/* Las dos ayudas pueden ocupar distinto número de líneas. Reservar dos
+   renglones mantiene ambos enlaces y el botón Eliminar en la misma altura. */
+.campo--ruta .campo__nota { min-height: 3em; }
+
+.campo--cliente {
+  padding: 15px 16px 16px;
+  border: 1px solid #76a98b;
+  border-left: 5px solid var(--verde);
+  border-radius: var(--radio);
+  background: var(--verde-claro);
+}
+
+.cliente__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.cliente__titulo {
+  margin: 0;
+  font-size: 15px;
+}
+
+.cliente__distintivo {
+  flex: none;
+  color: #0f653a;
+  background: #fff;
+  border: 1px solid #76a98b;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.cliente__ayuda {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 10px;
+  color: #194c31;
+  font-size: 13px;
+}
+
+.campo--cliente .campo__entrada {
+  border-color: #76a98b;
+  background: #fff;
+}
+
 .campo__error,
 .formulario__error {
   margin: 6px 0 0;
@@ -202,21 +279,6 @@ body {
   height: 16px;
   flex: none;
 }
-
-.avanzado {
-  border-top: 1px solid var(--borde);
-  padding-top: 12px;
-  margin: 18px 0;
-}
-
-.avanzado__resumen {
-  cursor: pointer;
-  font-size: 13.5px;
-  color: var(--texto-suave);
-  font-weight: 500;
-}
-
-.avanzado[open] .avanzado__resumen { margin-bottom: 12px; }
 
 /* ---------- Botones ---------- */
 
@@ -252,6 +314,28 @@ body {
 }
 
 .boton--secundario:hover { background: var(--gris-claro); }
+
+.boton--agregar {
+  margin-top: 10px;
+  background: var(--azul-claro);
+  border-color: var(--azul);
+  color: var(--azul);
+}
+
+.boton--agregar:hover { background: #d9e8fa; }
+
+.boton--quitar {
+  align-self: end;
+  margin-bottom: 1px;
+  padding: 9px 11px;
+  background: var(--fondo-tarjeta);
+  border-color: var(--borde-fuerte);
+  color: var(--rojo);
+}
+
+.boton--quitar:hover { background: var(--rojo-claro); border-color: var(--rojo); }
+
+.boton--quitar[hidden] { display: none; }
 
 .boton--enlace {
   background: none;
@@ -620,4 +704,8 @@ body {
     justify-self: start;
   }
   .consola { height: 220px; }
+
+  .rutas__fila { grid-template-columns: 1fr; }
+  .campo--ruta .campo__nota { min-height: 0; }
+  .boton--quitar { justify-self: start; }
 }

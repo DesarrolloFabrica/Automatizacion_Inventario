@@ -128,6 +128,27 @@ class TestGestor(unittest.TestCase):
         self.assertEqual(otro.estado_general, "en_cola")
         self.assertEqual(len(g.listar()), 2)
 
+    def test_una_corrida_acepta_varias_parejas_origen_destino(self):
+        g = self.gestor()
+        lotes = [
+            construir_lote(ORIGEN, RAIZ, "Carpetas", "", fila=1),
+            construir_lote("otroOrigen99", "otraRaizDestino99", "Carpetas", "", fila=2),
+        ]
+        trabajo = g.lanzar(lotes=lotes)
+
+        self.assertEqual(trabajo.lotes, lotes)
+        self.assertEqual(len(g.ver(trabajo.id)["lotes"]), 2)
+
+    def test_no_deja_repetir_un_origen_dentro_de_la_misma_corrida(self):
+        g = self.gestor()
+        lotes = [
+            construir_lote(ORIGEN, RAIZ, "Carpetas", ""),
+            construir_lote(ORIGEN, "otraRaizDestino99", "Carpetas", ""),
+        ]
+        with self.assertRaises(ErrorFlujo) as cm:
+            g.lanzar(lotes=lotes)
+        self.assertIn("más de una vez", cm.exception.motivo)
+
     def test_terminada_libera_el_origen(self):
         g = self.gestor()
         primera = g.lanzar(origen=URL_ORIGEN, destino=URL_RAIZ)
@@ -222,6 +243,43 @@ class TestApi(unittest.TestCase):
         self.assertIn("origen", r.json()["motivo"])
         self.assertTrue(r.json()["accion"])
 
+    def test_varias_filas_se_convierten_en_lotes_y_las_vacias_se_ignoran(self):
+        r = self.cliente.post(
+            "/api/corridas",
+            json={
+                "lotes": [
+                    {"origen": URL_ORIGEN, "destino": URL_RAIZ},
+                    {"origen": "", "destino": ""},
+                    {"origen": "otroOrigen99", "destino": "otraRaizDestino99"},
+                ],
+                "etiqueta": "Carpetas del día",
+                "cliente": "",
+                "simular": False,
+            },
+        )
+
+        self.assertEqual(r.status_code, 201, r.text)
+        trabajo = self.gestor.obtener(r.json()["corrida_id"])
+        self.assertEqual(len(trabajo.lotes), 2)
+        self.assertFalse(trabajo.simular)
+
+    def test_fila_a_medio_llenar_explica_que_falta(self):
+        r = self.cliente.post(
+            "/api/corridas",
+            json={"lotes": [{"origen": URL_ORIGEN, "destino": ""}]},
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("destino", r.json()["motivo"])
+        self.assertIn("dos enlaces", r.json()["accion"])
+
+    def test_todas_las_filas_vacias_no_crean_corrida(self):
+        r = self.cliente.post(
+            "/api/corridas",
+            json={"lotes": [{"origen": "", "destino": ""}]},
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("No hay carpetas", r.json()["motivo"])
+
     def test_dos_veces_el_mismo_origen_devuelve_409(self):
         self.cliente.post("/api/corridas", json={"origen": URL_ORIGEN, "destino": URL_RAIZ})
         r = self.cliente.post("/api/corridas", json={"origen": URL_ORIGEN, "destino": URL_RAIZ})
@@ -260,8 +318,13 @@ class TestApi(unittest.TestCase):
         inicio = self.cliente.get("/")
         self.assertEqual(inicio.status_code, 200)
         self.assertIn("text/html", inicio.headers["content-type"])
+        self.assertEqual(inicio.headers["cache-control"], "no-store, max-age=0")
+        self.assertIn("app.js?v=20260923-3", inicio.text)
+        self.assertIn("estilos.css?v=20260923-3", inicio.text)
         for archivo in ("estilos.css", "app.js"):
-            self.assertEqual(self.cliente.get(f"/{archivo}").status_code, 200, archivo)
+            respuesta = self.cliente.get(f"/{archivo}")
+            self.assertEqual(respuesta.status_code, 200, archivo)
+            self.assertEqual(respuesta.headers["cache-control"], "no-store, max-age=0")
 
 
 # ---------------------------------------------------------------------------

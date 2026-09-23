@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Clonación e inventario — Fábrica de contenido</title>
-  <link rel="stylesheet" href="estilos.css">
+  <link rel="stylesheet" href="estilos.css?v=20260923-3">
 </head>
 <body>
 
@@ -31,46 +31,42 @@
 
         <form id="formulario" novalidate>
 
-          <div class="campo">
-            <label class="campo__etiqueta" for="campo-origen">Carpeta de origen</label>
-            <p class="campo__nota" id="nota-origen">
-              Enlace de la carpeta de Google Drive que se va a copiar. No se modifica nada dentro de ella.
+          <fieldset class="rutas">
+            <legend class="campo__etiqueta">Carpetas a procesar</legend>
+            <p class="campo__nota rutas__nota">
+              Cada fila es una copia independiente. Puedes agregar todas las que necesites;
+              las filas completamente vacías se ignoran.
             </p>
-            <input
-              class="campo__entrada"
-              id="campo-origen"
-              name="origen"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="https://drive.google.com/drive/folders/1Ab…"
-              aria-describedby="nota-origen error-origen"
-              required>
-            <p class="campo__error" id="error-origen" role="alert" hidden></p>
-          </div>
+            <div id="filas-rutas" class="rutas__filas"></div>
+            <button class="boton boton--agregar" id="boton-agregar-fila" type="button">
+              + Agregar otra fila
+            </button>
+          </fieldset>
 
-          <div class="campo">
-            <label class="campo__etiqueta" for="campo-destino">Carpeta de destino</label>
-            <p class="campo__nota" id="nota-destino">
-              Enlace de la carpeta <strong>contenedora</strong>. Dentro de ella se creará automáticamente
-              una carpeta con el mismo nombre que la de origen, y la copia se hará ahí.
-            </p>
-            <input
-              class="campo__entrada"
-              id="campo-destino"
-              name="destino"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="https://drive.google.com/drive/folders/1Zx…"
-              aria-describedby="nota-destino error-destino"
-              required>
-            <p class="campo__error" id="error-destino" role="alert" hidden></p>
-          </div>
+          <template id="plantilla-fila-ruta">
+            <div class="rutas__fila">
+              <div class="campo campo--ruta">
+                <label class="campo__etiqueta" data-etiqueta="origen">Carpeta de origen</label>
+                <p class="campo__nota">La carpeta de Drive que se va a copiar. El origen no se modifica.</p>
+                <input class="campo__entrada" data-campo="origen" type="text" autocomplete="off"
+                       spellcheck="false" placeholder="https://drive.google.com/drive/folders/1Ab…">
+                <p class="campo__error" data-error="origen" role="alert" hidden></p>
+              </div>
+              <div class="campo campo--ruta">
+                <label class="campo__etiqueta" data-etiqueta="destino">Carpeta de destino</label>
+                <p class="campo__nota">La carpeta contenedora donde se creará la copia.</p>
+                <input class="campo__entrada" data-campo="destino" type="text" autocomplete="off"
+                       spellcheck="false" placeholder="https://drive.google.com/drive/folders/1Zx…">
+                <p class="campo__error" data-error="destino" role="alert" hidden></p>
+              </div>
+              <button class="boton boton--quitar" data-accion="quitar" type="button"
+                      aria-label="Eliminar esta fila">Eliminar</button>
+            </div>
+          </template>
 
           <div class="campo">
             <label class="campo__etiqueta" for="campo-etiqueta">
-              Nombre del lote <span class="campo__opcional">(opcional)</span>
+              Nombre de la carpeta <span class="campo__opcional">(opcional)</span>
             </label>
             <p class="campo__nota" id="nota-etiqueta">
               Sirve para reconocer esta corrida más adelante en la lista.
@@ -86,40 +82,23 @@
               aria-describedby="nota-etiqueta">
           </div>
 
-          <div class="campo">
-            <label class="campo__etiqueta" for="campo-cliente">Cliente</label>
-            <p class="campo__nota" id="nota-cliente">
-              Normalmente no hace falta tocarlo: se deduce de dónde está la carpeta en Drive.
-            </p>
+          <div class="campo campo--cliente">
+            <div class="cliente__cabecera">
+              <label class="campo__etiqueta cliente__titulo" for="campo-cliente">Cliente</label>
+              <span class="cliente__distintivo">OPCIONAL</span>
+            </div>
+            <div class="cliente__ayuda" id="nota-cliente">
+              <strong>¿No conoces el cliente? No cambies nada.</strong>
+              <span>Deja seleccionada la opción automática y el sistema lo detectará desde Drive.</span>
+            </div>
             <select class="campo__entrada campo__entrada--select" id="campo-cliente" name="cliente"
                     aria-describedby="nota-cliente">
-              <option value="">(Detectar automáticamente)</option>
+              <option value="">Detectar automáticamente — recomendado</option>
               <option value="PRODUCTO">PRODUCTO</option>
               <option value="TANIA">TANIA</option>
               <option value="LMS_correcciones">LMS_correcciones</option>
             </select>
           </div>
-
-          <div class="campo campo--casilla">
-            <input type="checkbox" id="campo-simular" name="simular" checked>
-            <label for="campo-simular">
-              Modo prueba: no escribe en la base de datos ni envía correo
-            </label>
-          </div>
-
-          <details class="avanzado">
-            <summary class="avanzado__resumen">Opciones avanzadas</summary>
-            <div class="campo campo--casilla">
-              <input type="checkbox" id="campo-forzar" name="forzar_carga">
-              <label for="campo-forzar">
-                Cargar a la base aunque la verificación encuentre diferencias
-              </label>
-            </div>
-            <p class="campo__nota">
-              Déjalo sin marcar salvo que alguien del equipo te lo pida: por defecto los lotes
-              con diferencias se retienen y no se cargan.
-            </p>
-          </details>
 
           <!-- tabindex -1: al rechazar el servidor, el foco salta aquí para que
                el mensaje se lea también con teclado o lector de pantalla -->
@@ -197,6 +176,6 @@
     <span id="pie-modo"></span>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260923-3"></script>
 </body>
 </html>
