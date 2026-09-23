@@ -91,22 +91,16 @@ USER fabrica
 EXPOSE 8080
 
 # --- Arranque ---------------------------------------------------------------
-# Dos cosas en una sola linea de shell (por eso "sh -c" y no la forma exec pura:
-# hace falta expandir $PORT, que Cloud Run entrega como variable de entorno):
+# Se usa "sh -c" para expandir $PORT, que Cloud Run entrega como variable de
+# entorno. El token no se copia al disco: servidor/configuracion.py lee
+# GOOGLE_TOKEN_JSON directamente desde el volumen de solo lectura de Secret
+# Manager y pasa esa ruta a flujo_lib/drive.py.
 #
-# 1) Si las credenciales de Google llegan como secreto montado en un archivo
-#    (GOOGLE_TOKEN_JSON, normalmente /secretos/token.json) se copia a
-#    /app/token.json, que es donde flujo_lib/drive.py las busca
-#    (RUTA_TOKEN = ROOT / "token.json"). No se monta el secreto directamente en
-#    /app/token.json porque Cloud Run monta el DIRECTORIO del secreto y taparia
-#    todo el codigo de /app. Si el servidor ya resuelve esto por su cuenta, la
-#    copia es inofensiva: no pisa un token que ya exista.
-#
-# 2) uvicorn con UN SOLO worker, a proposito. Las corridas viven en hilos dentro
+# Uvicorn corre con UN SOLO worker, a proposito. Las corridas viven en hilos dentro
 #    del proceso y se coordinan con candados en memoria; con varios workers cada
 #    proceso tendria su propio estado y sus propios candados, y dos peticiones
 #    podrian lanzar la misma corrida a la vez o ver estados distintos. Por la
 #    misma razon el servicio se despliega con --max-instances=1.
 #    "exec" hace que uvicorn sea el proceso 1 y reciba las senales de parada de
 #    Cloud Run (apagado limpio en vez de muerte a los 10 segundos).
-CMD ["/bin/sh", "-c", "if [ -n \"$GOOGLE_TOKEN_JSON\" ] && [ -f \"$GOOGLE_TOKEN_JSON\" ] && [ ! -f /app/token.json ]; then cp \"$GOOGLE_TOKEN_JSON\" /app/token.json; fi; exec uvicorn servidor.app:app --host 0.0.0.0 --port \"${PORT:-8080}\" --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["/bin/sh", "-c", "exec uvicorn servidor.app:app --host 0.0.0.0 --port \"${PORT:-8080}\" --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
