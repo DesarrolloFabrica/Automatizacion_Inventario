@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from flujo_lib.verificacion import verificar_lote
+from flujo_lib.verificacion import EXTENSIONES_POR_TIPO, verificar_lote
 from tests.fake_drive import FakeDrive
 
 
@@ -43,6 +43,43 @@ class TestVerificacion(unittest.TestCase):
         self.fake.agregar_archivo("curso.pdf", c, contenido=b"x")
         resultado = self.verificar()
         self.assertTrue(any("mal ubicado" in h and "zip" in h for h in resultado.hallazgos))
+
+
+class TestReglasDeUbicacionReales(unittest.TestCase):
+    """
+    Las reglas se contrastaron contra el material real de la fábrica. En
+    ACTIVIDADES MOODLE conviven txt y docx (184 y 138 archivos en los dos
+    programas medidos); marcar el docx como error generaba un centenar de
+    avisos falsos que tapaban los problemas de verdad.
+    """
+
+    def test_moodle_acepta_txt_y_docx(self):
+        permitidas = EXTENSIONES_POR_TIPO["ACTIVIDADES MOODLE"]
+        self.assertIn("txt", permitidas)
+        self.assertIn("docx", permitidas)
+
+    def test_moodle_sigue_rechazando_lo_que_no_toca(self):
+        self.assertNotIn("mp4", EXTENSIONES_POR_TIPO["ACTIVIDADES MOODLE"])
+
+    def test_un_docx_en_moodle_ya_no_es_diferencia(self):
+        fake = FakeDrive()
+        origen = fake.agregar_carpeta("PROGRAMA")
+        moodle_o = fake.agregar_carpeta("ACTIVIDADES MOODLE", origen)
+        fake.agregar_archivo("ACA.docx", moodle_o, contenido=b"a")
+        fake.agregar_archivo("01_Quiz.txt", moodle_o, contenido=b"b")
+
+        clon = fake.agregar_carpeta("PROGRAMA copia")
+        moodle_c = fake.agregar_carpeta("ACTIVIDADES MOODLE", clon)
+        fake.agregar_archivo("ACA.docx", moodle_c, contenido=b"a")
+        fake.agregar_archivo("01_Quiz.txt", moodle_c, contenido=b"b")
+
+        resultado = verificar_lote(
+            fake, origen, clon, programa="PROGRAMA",
+            meta={"cliente": "PRODUCTO", "raiz": "LMS_Carga"},
+            parser=lambda *_a, **_k: {"ok": True},  # indexable: aquí no se prueba eso
+        )
+        mal_ubicados = [h for h in resultado.hallazgos if "mal ubicado" in h]
+        self.assertEqual(mal_ubicados, [])
 
 
 if __name__ == "__main__":

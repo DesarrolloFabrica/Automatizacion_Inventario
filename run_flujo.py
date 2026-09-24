@@ -625,6 +625,7 @@ def ejecutar_corrida(
                         destinatarios=correos_aviso(), resultado="fallido",
                         schema=args.schema, filas=[], enlace_sheet="",
                         estado_xlsx=ruta_xlsx,
+                        contenido=estado.bytes_excel(),
                         error_general={"motivo": primero.mensaje, "accion": primero.accion},
                     )
                     enviar_correo(res.creds, mensaje)
@@ -694,6 +695,7 @@ def ejecutar_corrida(
                 schema=args.schema, filas=filas_correo,
                 enlace_sheet=(estado.datos.get("inventario") or {}).get("sheet", ""),
                 estado_xlsx=ruta_xlsx,
+                contenido=estado.bytes_excel(),
             )
             enviar_correo(res.creds, mensaje)
             logging.info("Correo final enviado a: %s", ", ".join(correos_aviso()))

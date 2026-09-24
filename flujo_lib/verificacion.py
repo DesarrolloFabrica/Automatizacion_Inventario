@@ -11,8 +11,19 @@ from . import ROOT, drive
 from .drive import MIME_FOLDER
 from .nombres import es_jpg, extension, nombre_canonico
 
+# Qué extensiones son válidas dentro de cada tipo de carpeta.
+#
+# Contrastado contra el material real de la fábrica (2026-09-24, programas de
+# Derecho y Gerontología): en ACTIVIDADES MOODLE conviven txt y docx, y ambas
+# formas son correctas. Los demás tipos no aparecieron en ese material; se
+# mantienen porque pueden existir en otros programas, y una regla que nunca
+# coincide no estorba.
+#
+# Si algún día aparece un tipo nuevo, es preferible dejarlo sin regla a ponerle
+# una estrecha: una regla equivocada genera cientos de avisos falsos que tapan
+# los problemas de verdad.
 EXTENSIONES_POR_TIPO = {
-    "ACTIVIDADES MOODLE": {"txt"}, "SCORM": {"zip"}, "PDF": {"pdf"},
+    "ACTIVIDADES MOODLE": {"txt", "docx"}, "SCORM": {"zip"}, "PDF": {"pdf"},
     "FICHAS": {"pdf"}, "REVISTA": {"pdf"}, "GLOSARIO": {"pdf"},
     "PORTADA MATERIA": {"png"}, "PODCAST": {"mp3"},
 }

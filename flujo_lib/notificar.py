@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64, html, sys
+import base64, html, logging, sys
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -13,6 +13,8 @@ from googleapiclient.discovery import build
 from . import ROOT
 from .estado import ETIQUETAS_ESTADO
 
+logger = logging.getLogger(__name__)
+
 
 def _consulta_sql(schema: str, programas: list[str]) -> str:
     carpeta = str(ROOT / "LMS_Fabrica")
@@ -22,7 +24,7 @@ def _consulta_sql(schema: str, programas: list[str]) -> str:
     return consulta_sql(schema, programas)
 
 
-def construir_mensaje(*, destinatarios: list[str], resultado: str, schema: str, filas: list[dict], enlace_sheet: str, estado_xlsx: Path, error_general: dict | None = None) -> MIMEMultipart:
+def construir_mensaje(*, destinatarios: list[str], resultado: str, schema: str, filas: list[dict], enlace_sheet: str, estado_xlsx: Path, error_general: dict | None = None, contenido: bytes | None = None) -> MIMEMultipart:
     titulos = {"ok": "Proceso completado", "con_pendientes": "Proceso terminado con pendientes", "fallido": "El proceso necesita atención"}
     asunto = f"Fábrica de contenidos ({schema}): {titulos.get(resultado, titulos['fallido'])}"
     mensaje = MIMEMultipart()
@@ -47,11 +49,29 @@ def construir_mensaje(*, destinatarios: list[str], resultado: str, schema: str, 
         error = fila.get("ultimo_error")
         if error:
             cuerpo.append(f"<p><b>Qué pasó:</b> {html.escape(error.get('motivo') or '')}<br><b>Qué hacer:</b> {html.escape(error.get('accion') or '')}</p>")
+    # El adjunto nunca puede impedir que el correo salga: en el servicio
+    # desplegado el Excel vive en el bucket, no en el disco del contenedor, así
+    # que `contenido` llega ya leído de donde esté. Se resuelve antes de cerrar
+    # el cuerpo para poder avisar dentro del mensaje si no se pudo adjuntar.
+    datos = contenido
+    if datos is None:
+        try:
+            datos = Path(estado_xlsx).read_bytes()
+        except OSError as e:
+            logger.warning("El correo saldrá sin el Excel de estado adjunto: %r", e)
+            datos = None
+    if not datos:
+        cuerpo.append(
+            "<p>El Excel de estado no se pudo adjuntar. Está disponible en "
+            f"<code>{html.escape(str(estado_xlsx))}</code>.</p>"
+        )
+
     mensaje.attach(MIMEText("".join(cuerpo), "html", "utf-8"))
-    contenido = Path(estado_xlsx).read_bytes()
-    adjunto = MIMEApplication(contenido, Name=Path(estado_xlsx).name)
-    adjunto.add_header("Content-Disposition", "attachment", filename=Path(estado_xlsx).name)
-    mensaje.attach(adjunto)
+    if datos:
+        nombre = Path(estado_xlsx).name
+        adjunto = MIMEApplication(datos, Name=nombre)
+        adjunto.add_header("Content-Disposition", "attachment", filename=nombre)
+        mensaje.attach(adjunto)
     return mensaje
 
 

@@ -11,6 +11,7 @@ Nada de este módulo habla con Google ni con la base de datos.
 
 from __future__ import annotations
 
+import logging
 import io, json, os, tempfile
 from datetime import datetime
 from pathlib import Path
@@ -497,6 +498,25 @@ class EstadoCorrida:
         if ultimo:
             return ultimo.get("motivo", ""), ultimo.get("accion", "")
         return "", ""
+
+    def bytes_excel(self) -> bytes | None:
+        """
+        Contenido del Excel de estado, venga del almacén o del disco.
+
+        Lo usa el correo para adjuntarlo. Devuelve None si aún no se ha
+        exportado o no se puede leer: quedarse sin adjunto es molesto, pero
+        quedarse sin correo es mucho peor.
+        """
+        try:
+            if self.almacen is not None:
+                return self.almacen.leer(self.nombre_excel)
+            ruta = self.ruta_json.with_name(self.nombre_excel)
+            return ruta.read_bytes() if ruta.is_file() else None
+        except Exception as e:
+            logging.getLogger(__name__).debug(
+                "No se pudo leer el Excel de estado para adjuntarlo: %r", e
+            )
+            return None
 
     def exportar_excel(self, ruta: Path | None = None) -> Path:
         """

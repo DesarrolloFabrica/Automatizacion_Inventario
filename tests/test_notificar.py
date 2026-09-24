@@ -6,6 +6,8 @@ from email.header import decode_header, make_header
 from pathlib import Path
 from unittest import mock
 
+from flujo_lib.almacen import crear_almacen
+from flujo_lib.estado import EstadoCorrida
 from flujo_lib.notificar import construir_mensaje, enviar_correo
 
 
@@ -51,6 +53,77 @@ class TestNotificar(unittest.TestCase):
         self.assertIn("Qué pasó", texto)
         self.assertIn("Vuelve a ejecutar", texto)
         self.assertNotIn("Traceback", texto)
+
+
+class TestAdjuntoDelEstado(unittest.TestCase):
+    """
+    En el servicio desplegado el Excel de estado vive en el bucket, no en el
+    disco del contenedor. El correo tiene que salir igual.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.comunes = dict(
+            destinatarios=["ana@cun.edu.co"], resultado="ok", schema="fabrica_pruebas",
+            filas=[], enlace_sheet="",
+        )
+
+    def partes(self, mensaje):
+        return [p for p in mensaje.walk() if p.get_content_maintype() != "multipart"]
+
+    def test_contenido_dado_se_adjunta_sin_tocar_el_disco(self):
+        inexistente = self.dir / "no_existe.estado.xlsx"
+        mensaje = construir_mensaje(
+            **self.comunes, estado_xlsx=inexistente, contenido=b"bytes del excel"
+        )
+        adjuntos = [p for p in self.partes(mensaje) if p.get_filename()]
+        self.assertEqual([p.get_filename() for p in adjuntos], ["no_existe.estado.xlsx"])
+        self.assertEqual(adjuntos[0].get_payload(decode=True), b"bytes del excel")
+
+    def test_sin_adjunto_el_correo_sale_igual_y_lo_dice(self):
+        inexistente = self.dir / "perdido.estado.xlsx"
+        mensaje = construir_mensaje(**self.comunes, estado_xlsx=inexistente)
+
+        self.assertEqual([p.get_filename() for p in self.partes(mensaje) if p.get_filename()], [])
+        cuerpo = next(
+            p.get_payload(decode=True).decode("utf-8")
+            for p in self.partes(mensaje) if p.get_content_type() == "text/html"
+        )
+        self.assertIn("no se pudo adjuntar", cuerpo)
+        self.assertIn("perdido.estado.xlsx", cuerpo)
+
+    def test_el_cuerpo_va_siempre_antes_que_el_adjunto(self):
+        """Los lectores de correo muestran la primera parte: debe ser el texto."""
+        mensaje = construir_mensaje(
+            **self.comunes, estado_xlsx=self.dir / "x.xlsx", contenido=b"datos"
+        )
+        self.assertEqual(self.partes(mensaje)[0].get_content_type(), "text/html")
+
+
+class TestBytesDelEstado(unittest.TestCase):
+    """De dónde saca el correo el Excel: del almacén si lo hay, del disco si no."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_del_disco(self):
+        estado = EstadoCorrida.abrir(self.dir / "RUTAS.xlsx", self.dir)
+        estado.exportar_excel()
+        self.assertTrue((estado.bytes_excel() or b"").startswith(b"PK"))  # un .xlsx es un zip
+
+    def test_del_almacen(self):
+        almacen = crear_almacen(self.dir / "bucket")
+        estado = EstadoCorrida.abrir(self.dir / "RUTAS.xlsx", self.dir, almacen=almacen)
+        estado.exportar_excel()
+        self.assertTrue((estado.bytes_excel() or b"").startswith(b"PK"))
+
+    def test_sin_exportar_todavia_devuelve_nada(self):
+        estado = EstadoCorrida.abrir(self.dir / "RUTAS.xlsx", self.dir)
+        self.assertIsNone(estado.bytes_excel())
 
 
 if __name__ == "__main__": unittest.main()
