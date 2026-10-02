@@ -191,6 +191,8 @@
     var fila = fragmento.querySelector('.rutas__fila');
     var origen = fila.querySelector('[data-campo="origen"]');
     var destino = fila.querySelector('[data-campo="destino"]');
+    var crearDestino = fila.querySelector('[data-campo="crear-destino"]');
+    var notaDestino = fila.querySelector('[data-nota="destino"]');
     var errorOrigen = fila.querySelector('[data-error="origen"]');
     var errorDestino = fila.querySelector('[data-error="destino"]');
 
@@ -204,6 +206,17 @@
     destino.setAttribute('aria-describedby', errorDestino.id);
     origen.value = valores && valores.origen ? valores.origen : '';
     destino.value = valores && valores.destino ? valores.destino : '';
+    crearDestino.checked = !valores || valores.crear_destino !== false;
+
+    function explicarDestino() {
+      if (crearDestino.checked) {
+        notaDestino.textContent = 'Pega la carpeta padre. Se creará dentro una carpeta con el nombre exacto del origen.';
+      } else {
+        notaDestino.textContent = 'Pega la carpeta final existente. No se creará ninguna carpeta nueva.';
+      }
+    }
+    crearDestino.addEventListener('change', explicarDestino);
+    explicarDestino();
 
     [
       [origen, errorOrigen],
@@ -373,6 +386,7 @@
     filasDeRutas().forEach(function (fila) {
       var entradaOrigen = fila.querySelector('[data-campo="origen"]');
       var entradaDestino = fila.querySelector('[data-campo="destino"]');
+      var crearDestino = fila.querySelector('[data-campo="crear-destino"]').checked;
       var textoOrigen = entradaOrigen.value.trim();
       var textoDestino = entradaDestino.value.trim();
       var errorOrigen = fila.querySelector('[data-error="origen"]');
@@ -391,7 +405,7 @@
         primeraInvalida = primeraInvalida || (okOrigen ? entradaDestino : entradaOrigen);
         return;
       }
-      lotes.push({ origen: textoOrigen, destino: textoDestino });
+      lotes.push({ origen: textoOrigen, destino: textoDestino, crear_destino: crearDestino });
     });
 
     if (primeraInvalida) {

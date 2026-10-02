@@ -35,7 +35,9 @@ from lms_lib.constantes import (
     DRIVE_ID_PATTERN,
     ENV_PATH,
     EXTENSION_MAP,
+    MIME_EXTENSION,
     MIME_FOLDER,
+    MIME_GOOGLE_PREFIJO,
     PAQUETES_VALIDOS,
     PATRON_ARCHIVO,
     PATRON_CODIGO,
@@ -139,8 +141,8 @@ def listar_hijos(servicio, parent_id: str) -> list[dict]:
             return hijos
 
 
-def obtener_extension(archivo: dict) -> str:
-    """Obtiene la extensión del archivo desde metadatos Drive o desde el nombre."""
+def extension_por_nombre(archivo: dict) -> str:
+    """Extensión que dice el nombre (o el fileExtension de Drive, que sale del nombre)."""
     ext = archivo.get("fileExtension")
     if ext:
         return str(ext).lower()
@@ -148,6 +150,25 @@ def obtener_extension(archivo: dict) -> str:
     if "." in nombre:
         return Path(nombre).suffix.lstrip(".").lower()
     return ""
+
+
+def obtener_extension(archivo: dict) -> str:
+    """
+    Extensión según el formato real del archivo (mimeType de Drive), no el nombre.
+
+    - "G1_x.png" que en realidad es PDF → "pdf"; "G2_xpdf" (sin punto) → "pdf".
+    - Documento nativo de Google (Docs, Sheets…) → "" (sin extensión).
+    - Si el nombre trae una variante del mismo formato (jpeg, ai, quiz…) se respeta.
+    - Tipo genérico o desconocido (application/octet-stream…) → se usa el nombre.
+    """
+    por_nombre = extension_por_nombre(archivo)
+    mime = str(archivo.get("mimeType") or "")
+    if mime.startswith(MIME_GOOGLE_PREFIJO):
+        return ""
+    if mime in MIME_EXTENSION:
+        real, aceptadas = MIME_EXTENSION[mime]
+        return por_nombre if por_nombre in aceptadas else real
+    return por_nombre
 
 
 def extraer_codigo(nombre: str) -> str | None:
@@ -529,7 +550,7 @@ class IdResolver:
         Resuelve extension_id sin duplicar formatos.
         1) EXTENSION_MAP (ids fijos GCP)  2) lookup/create por tipo normalizado.
         """
-        tipo_norm = normalizar_extension(tipo) or "sin_extension"
+        tipo_norm = normalizar_extension(tipo)  # vacía = sin extensión, como en GCP
         key = ("extension", "tipo", tipo_norm)
         if key in self.cache:
             return self.cache[key]
@@ -596,7 +617,7 @@ class IdResolver:
             "cliente_id": str(cliente_id),
             "cliente_nombre": reg["cliente"],
             "extension_id": str(extension_id),
-            "extension_tipo": normalizar_extension(reg["extension"]) or "sin_extension",
+            "extension_tipo": normalizar_extension(reg["extension"]),
         }
 
     def close(self) -> None:

@@ -204,6 +204,22 @@ body {
    renglones mantiene ambos enlaces y el botón Eliminar en la misma altura. */
 .campo--ruta .campo__nota { min-height: 3em; }
 
+.opcion-creacion {
+  display: flex;
+  gap: .65rem;
+  align-items: flex-start;
+  margin-top: .8rem;
+  padding: .8rem;
+  border: 1px solid var(--borde, #d8dee8);
+  border-radius: .65rem;
+  background: #f7f9fc;
+  cursor: pointer;
+}
+
+.opcion-creacion input { margin-top: .2rem; }
+.opcion-creacion span { display: grid; gap: .25rem; }
+.opcion-creacion small { color: var(--texto-suave, #596579); line-height: 1.35; }
+
 .campo--cliente {
   padding: 15px 16px 16px;
   border: 1px solid #76a98b;

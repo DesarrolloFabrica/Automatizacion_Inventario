@@ -1,4 +1,10 @@
-"""Conversión reanudable de JPG/JPEG a PNG dentro del clon de Drive."""
+"""
+Conversión reanudable de JPG/JPEG a PNG dentro del clon de Drive.
+
+Qué se convierte lo decide el formato real del archivo (mimeType), no el nombre:
+un JPEG llamado ".png" se convierte, un PDF llamado ".jpg" no se toca y un PNG
+llamado ".jpg" solo se renombra.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +16,7 @@ from PIL import Image
 
 from . import drive
 from .drive import MIME_FOLDER
-from .nombres import es_jpg, nombre_png
+from .nombres import es_png_con_nombre_jpg, nombre_png, requiere_formato
 
 
 @dataclass
@@ -50,12 +56,12 @@ def _a_png(contenido: bytes) -> bytes:
 
 
 def _contar_jpg(svc, carpeta_id: str, listar) -> int:
-    """Cuántos JPG/JPEG hay en el subárbol (para saber el total del avance)."""
+    """Cuántos archivos hay que pasar a PNG en el subárbol (para el total del avance)."""
     total = 0
     for hijo in listar(svc, carpeta_id):
         if hijo.get("mimeType") == MIME_FOLDER:
             total += _contar_jpg(svc, hijo["id"], listar)
-        elif es_jpg(hijo["name"]):
+        elif requiere_formato(hijo["name"], hijo.get("mimeType")):
             total += 1
     return total
 
@@ -88,16 +94,28 @@ def convertir_arbol(
         archivos = [h for h in hijos if h.get("mimeType") != MIME_FOLDER]
         por_nombre = {h["name"]: h for h in archivos}
         for archivo in archivos:
-            if not es_jpg(archivo["name"]):
+            # Decide el formato real, no el nombre: un PDF llamado .jpg no se toca
+            # y un JPEG llamado .png sí se convierte.
+            if not requiere_formato(archivo["name"], archivo.get("mimeType")):
                 continue
             nombre_nuevo = nombre_png(archivo["name"])
             relativa = f"{ruta}/{archivo['name']}" if ruta else archivo["name"]
-            existente = por_nombre.get(nombre_nuevo)
+            # Si el nombre no cambia (JPEG llamado .png) el "existente" es él mismo.
+            existente = por_nombre.get(nombre_nuevo) if nombre_nuevo != archivo["name"] else None
             try:
                 if existente and int(existente.get("size") or 0) > 0:
                     drive.enviar_a_papelera(svc, archivo["id"])
                     resumen.ya_convertidos += 1
                     log(f"  [formato] {relativa} ya tenía PNG; JPG enviado a la papelera")
+                    continue
+                if es_png_con_nombre_jpg(archivo["name"], archivo.get("mimeType")):
+                    # Ya es PNG por dentro: basta con corregir el nombre.
+                    svc.files().update(
+                        fileId=archivo["id"], body={"name": nombre_nuevo},
+                        supportsAllDrives=True, fields="id, name",
+                    ).execute(num_retries=0)
+                    resumen.convertidos += 1
+                    log(f"  [formato] {relativa} ya era PNG por dentro; renombrado a {nombre_nuevo}")
                     continue
                 contenido = _a_png(_descargar(svc, archivo["id"]))
                 media = MediaIoBaseUpload(io.BytesIO(contenido), mimetype="image/png", resumable=True)

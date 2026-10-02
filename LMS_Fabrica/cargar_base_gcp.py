@@ -47,7 +47,9 @@ def next_id(cur, table: str) -> int:
 
 def resolver_extension_id(cur, tipo: str, cache: dict) -> int:
     """Misma regla que IdResolver: mapa fijo → lookup → create (sin duplicar formato)."""
-    tipo_norm = normalizar_extension(tipo) or "sin_extension"
+    # Sin extensión se guarda vacía (extension.tipo = ''), como los ya cargados;
+    # "sin_extension" no cabe en la columna (varchar(10)).
+    tipo_norm = normalizar_extension(tipo)
     cache_key = ("extension", "tipo", tipo_norm)
     if cache_key in cache:
         return cache[cache_key]

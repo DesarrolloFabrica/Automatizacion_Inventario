@@ -75,7 +75,7 @@ def escanear_lote(svc, destino_id: str, lote, destino_nombre: str, *, avance=Non
             "archivo_hash": reg.get("archivo_hash") or "",
             "archivo_fecha_registro": reg.get("archivo_fecha_registro") or ahora,
             "archivo_activo": reg.get("archivo_activo", "true"),
-            "extension_tipo": reg.get("extension") or "sin_extension",
+            "extension_tipo": reg.get("extension") or "",  # vacía = sin extensión (Google Docs), como en GCP
         })
     return filas
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import ROOT, drive
 from .drive import MIME_FOLDER
-from .nombres import es_jpg, extension, nombre_canonico
+from .nombres import nombre_canonico, requiere_formato
 
 # Qué extensiones son válidas dentro de cada tipo de carpeta.
 #
@@ -74,11 +74,26 @@ def _canon_ruta(ruta: str) -> str:
     return "/".join(partes)
 
 
+def _lms_en_path() -> None:
+    carpeta = str(ROOT / "LMS_Fabrica")
+    if carpeta not in sys.path:
+        sys.path.insert(0, carpeta)
+
+
+def _extension_real(item: dict) -> str:
+    """Formato real del archivo (mimeType), la misma regla con la que se carga a GCP."""
+    _lms_en_path()
+    from generar_base_lms import obtener_extension
+    return obtener_extension(item)
+
+
+def _describir(ext: str) -> str:
+    return f"«{ext}»" if ext else "un documento de Google (sin extensión)"
+
+
 def _es_indexable(ruta: str, programa: str, meta: dict[str, str], parser=None) -> bool:
     if parser is None:
-        carpeta = str(ROOT / "LMS_Fabrica")
-        if carpeta not in sys.path:
-            sys.path.insert(0, carpeta)
+        _lms_en_path()
         from generar_base_rutas import parsear_ruta, parsear_ruta_programa
         partes = [programa, *ruta.split("/")]
         return parsear_ruta_programa(partes, programa, meta) is not None or parsear_ruta(partes) is not None
@@ -110,13 +125,20 @@ def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: di
     destino_por_canon = {}
     for ruta, item in clon.items():
         destino_por_canon.setdefault(_canon_ruta(ruta), []).append((ruta, item))
-        if es_jpg(item["name"]):
+        if requiere_formato(item["name"], item.get("mimeType")):
             resultado.agregar(f"Quedó un JPG sin convertir: {ruta}.")
         padre = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
         tipo = _tipo_material(padre.rsplit("/", 1)[-1]) if padre else None
         permitidas = EXTENSIONES_POR_TIPO.get(tipo or "")
-        if permitidas and extension(item["name"]) not in permitidas:
-            resultado.agregar(f"Archivo mal ubicado en {tipo}: {ruta}; se espera {', '.join(sorted(permitidas))}.")
+        if permitidas:
+            # Se mira lo que el archivo ES, no cómo se llama: un PDF llamado .png
+            # en PORTADA MATERIA es un error aunque el nombre parezca correcto.
+            real = _extension_real(item)
+            if real not in permitidas:
+                resultado.agregar(
+                    f"Archivo mal ubicado en {tipo}: {ruta}; el archivo es {_describir(real)} "
+                    f"y se espera {', '.join(sorted(permitidas))}."
+                )
         if not _es_indexable(ruta, programa, meta, parser):
             resultado.agregar(f"Archivo no indexable: {ruta}.")
     for ruta, item in origen.items():
@@ -124,7 +146,8 @@ def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: di
         if not pares:
             continue
         _, copia = pares.pop(0)
-        if es_jpg(item["name"]):
+        if requiere_formato(item["name"], item.get("mimeType")):
+            # En el clon se convirtió: el contenido cambia a propósito, solo se exige que no esté vacío.
             if int(copia.get("size") or 0) <= 0:
                 resultado.agregar(f"PNG convertido sin contenido: {_canon_ruta(ruta)}.")
         elif item.get("md5Checksum") and (item.get("size"), item.get("md5Checksum")) != (copia.get("size"), copia.get("md5Checksum")):

@@ -37,7 +37,8 @@ _CLIENTES_VALIDOS = "PRODUCTO, TANIA o LMS_correcciones"
 
 
 def construir_lote(
-    origen: str, destino: str, etiqueta: str, cliente: str, *, fila: int = 1
+    origen: str, destino: str, etiqueta: str, cliente: str, *, fila: int = 1,
+    crear_destino: bool = True,
 ) -> Lote:
     """
     Arma el lote desde el formulario, con las mismas validaciones del Excel.
@@ -87,6 +88,7 @@ def construir_lote(
         destino_raiz_id=destino_id,
         origen_raw=origen,
         destino_raw=destino,
+        crear_destino=crear_destino,
     )
 
 

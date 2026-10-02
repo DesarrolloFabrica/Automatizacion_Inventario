@@ -55,6 +55,13 @@ class TestConstruirLote(unittest.TestCase):
         self.assertEqual(lote.destino_raiz_id, RAIZ)
         self.assertEqual(lote.etiqueta, "Derecho")
         self.assertTrue(lote.sin_clasificar)  # se deducirá de Drive
+        self.assertTrue(lote.crear_destino)
+
+    def test_puede_exigir_destino_final_existente(self):
+        lote = construir_lote(
+            URL_ORIGEN, URL_RAIZ, "Derecho", "", crear_destino=False
+        )
+        self.assertFalse(lote.crear_destino)
 
     def test_identificadores_sueltos(self):
         lote = construir_lote(ORIGEN, RAIZ, "", "")

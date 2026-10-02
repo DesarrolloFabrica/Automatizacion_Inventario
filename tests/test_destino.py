@@ -116,7 +116,7 @@ class TestResolverDestino(unittest.TestCase):
         self.assertEqual(
             cm.exception.motivo, "Dentro de «DESTINO RAIZ» no existe la carpeta «Lote Bogotá 2026»."
         )
-        self.assertEqual(cm.exception.accion, "Ejecuta primero la clonación del lote.")
+        self.assertIn("Crear la carpeta del programa", cm.exception.accion)
         self.assertEqual(self.fake.llamadas["create"], 0)
         self.assertEqual(self._subcarpetas(), [])
 

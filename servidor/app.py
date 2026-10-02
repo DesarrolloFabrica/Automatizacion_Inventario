@@ -39,6 +39,7 @@ class PeticionLote(BaseModel):
 
     origen: str = ""
     destino: str = ""
+    crear_destino: bool = True
 
 
 class PeticionCorrida(BaseModel):
@@ -141,6 +142,7 @@ def crear_app(cfg=None, gestor: Gestor | None = None) -> FastAPI:
                         peticion.etiqueta or "",
                         peticion.cliente or "",
                         fila=numero,
+                        crear_destino=fila.crear_destino,
                     )
                 )
 

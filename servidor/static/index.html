@@ -53,11 +53,20 @@
                 <p class="campo__error" data-error="origen" role="alert" hidden></p>
               </div>
               <div class="campo campo--ruta">
-                <label class="campo__etiqueta" data-etiqueta="destino">Carpeta de destino</label>
-                <p class="campo__nota">La carpeta contenedora donde se creará la copia.</p>
+                <label class="campo__etiqueta" data-etiqueta="destino">Carpeta raíz o destino final</label>
+                <p class="campo__nota" data-nota="destino">
+                  Pega la carpeta padre. Se creará dentro una carpeta con el nombre exacto del origen.
+                </p>
                 <input class="campo__entrada" data-campo="destino" type="text" autocomplete="off"
                        spellcheck="false" placeholder="https://drive.google.com/drive/folders/1Zx…">
                 <p class="campo__error" data-error="destino" role="alert" hidden></p>
+                <label class="opcion-creacion">
+                  <input data-campo="crear-destino" type="checkbox" checked>
+                  <span>
+                    <strong>Crear la carpeta del programa si todavía no existe</strong>
+                    <small>El enlace de arriba debe ser la carpeta raíz o escuela que contendrá el programa.</small>
+                  </span>
+                </label>
               </div>
               <button class="boton boton--quitar" data-accion="quitar" type="button"
                       aria-label="Eliminar esta fila">Eliminar</button>

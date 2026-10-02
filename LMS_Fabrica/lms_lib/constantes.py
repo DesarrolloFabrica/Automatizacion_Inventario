@@ -76,3 +76,32 @@ EXTENSION_MAP = {
     "gif": 665,
     "zip": 671,
 }
+
+# Formato real según el tipo que Drive reporta (mimeType), no según el nombre.
+# Por cada tipo: (extensión que se carga, extensiones de nombre que son el mismo
+# formato). Si el nombre ya trae una de las aceptadas se respeta (jpeg, ai, quiz…);
+# si trae otra cosa manda el tipo real: "G1_x.png" que en realidad es PDF → pdf.
+MIME_EXTENSION = {
+    "application/pdf": ("pdf", {"pdf", "ai"}),
+    "image/png": ("png", {"png"}),
+    "image/jpeg": ("jpg", {"jpg", "jpeg"}),
+    "image/gif": ("gif", {"gif"}),
+    "audio/mpeg": ("mp3", {"mp3"}),
+    "audio/wav": ("wav", {"wav"}),
+    "audio/x-wav": ("wav", {"wav"}),
+    "audio/mp4": ("m4a", {"m4a"}),
+    "audio/x-m4a": ("m4a", {"m4a"}),
+    "video/mp4": ("mp4", {"mp4"}),
+    "application/zip": ("zip", {"zip"}),
+    "application/x-zip-compressed": ("zip", {"zip"}),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ("docx", {"docx"}),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ("pptx", {"pptx"}),
+    "application/vnd.ms-powerpoint.presentation.macroEnabled.12": ("pptm", {"pptm"}),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ("xlsx", {"xlsx"}),
+    "text/plain": ("txt", {"txt", "quiz", "ini", "csv"}),
+    "text/xml": ("xml", {"xml"}),
+    "application/xml": ("xml", {"xml"}),
+}
+# Documentos nativos de Google (Docs, Sheets, Slides…): no tienen archivo ni
+# extensión; se cargan con extensión vacía, igual que los ya existentes en GCP.
+MIME_GOOGLE_PREFIJO = "application/vnd.google-apps."

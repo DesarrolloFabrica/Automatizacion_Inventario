@@ -116,6 +116,7 @@ class Lote:
     origen_raw: str
     destino_raw: str
     escuela_gcp: str = ""  # se completa al detectar la clasificación en Drive
+    crear_destino: bool = True  # web: el enlace es una raíz y puede crear la carpeta final
 
     @property
     def sin_clasificar(self) -> bool:

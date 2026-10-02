@@ -117,7 +117,7 @@ def resolver_destino(
     if not crear:
         raise DestinoNoEncontrado(
             f"Dentro de «{nombre_raiz}» no existe la carpeta «{nombre_origen}».",
-            "Ejecuta primero la clonación del lote.",
+            "Marca «Crear la carpeta del programa si todavía no existe» o pega el enlace de la carpeta final existente.",
             paso="destino",
             contexto=f"la carpeta «{nombre_origen}» dentro de «{nombre_raiz}»",
         )

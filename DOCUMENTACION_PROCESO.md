@@ -162,6 +162,18 @@ Ver la documentación de cada directorio:
 9. `clonar_esquema_pruebas.py` no forma parte del flujo diario.  
 10. No versionar secretos ni artefactos de corrida.  
 11. Código de archivo: prefijo `G` + dígitos si existe; en su defecto, nombre sin extensión.  
+12. El **formato** de cada archivo sale de lo que el archivo es (tipo real que
+    reporta Drive, `mimeType`), no del nombre. Aplica a los tres pasos:
+    - Carga a GCP: `G1_x.png` que en realidad es PDF se registra como `pdf`;
+      `G2_xpdf` (sin punto) también. Los documentos de Google (Docs, Sheets) van
+      con extensión vacía, como los ya cargados.
+    - Conversión: un JPEG llamado `.png` se convierte; un PDF llamado `.jpg` no
+      se toca; un PNG llamado `.jpg` solo se renombra.
+    - Verificación por carpeta: un PDF llamado `.png` en `PORTADA MATERIA`, o un
+      Google Doc llamado `.docx` en `ACTIVIDADES MOODLE`, se reporta como mal
+      ubicado (y retiene la carga del lote hasta corregirlo o usar `--forzar-carga`).
+    Si el nombre trae una variante del mismo formato (`.jpeg`, `.ai`, `.quiz`) se
+    respeta. Tabla de tipos: `LMS_Fabrica/lms_lib/constantes.py` (`MIME_EXTENSION`).  
 
 
 ==================================================

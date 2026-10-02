@@ -347,7 +347,10 @@ def resolver_paso_destino(
     try:
         origen = _carpeta(svc, carpetas, lote.origen_id, f"la carpeta origen del lote «{lote.etiqueta}»")
         raiz = _carpeta(svc, carpetas, lote.destino_raiz_id, contexto)
-        res = resolver_destino(svc, origen, raiz)
+        res = resolver_destino(
+            svc, origen, raiz,
+            crear=bool(getattr(lote, "crear_destino", True)),
+        )
     except Exception as e:
         _fallar_paso(estado, lote, "destino", traducir_excepcion(e, paso="destino", contexto=contexto))
         return None

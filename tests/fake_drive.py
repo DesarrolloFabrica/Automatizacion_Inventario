@@ -40,6 +40,13 @@ from googleapiclient.errors import HttpError
 MIME_FOLDER = "application/vnd.google-apps.folder"
 OPERACIONES = ("get", "list", "create", "copy", "update", "about", "get_media")
 _CAMPOS_POR_DEFECTO = frozenset({"id", "name", "mimeType", "kind"})
+
+# Tipo que Drive asigna al subir según la extensión (para archivos de prueba sin mime explícito).
+_MIME_POR_EXTENSION = {
+    "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "mp3": "audio/mpeg", "mp4": "video/mp4", "zip": "application/zip", "txt": "text/plain",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 _RX_CLAUSULAS = (
     (re.compile(r"^'((?:[^'\\]|\\.)*)'\s+in\s+parents$"), "parents"),
     (re.compile(r"^trashed\s*=\s*(true|false)$", re.I), "trashed"),
@@ -230,10 +237,14 @@ class FakeDrive:
         parent_id: str,
         *,
         contenido: bytes = b"x",
-        mime: str = "application/pdf",
+        mime: str | None = None,
         id: str | None = None,
     ) -> str:
+        """Sin `mime`, el tipo sale de la extensión como hace Drive al subir (sin extensión: PDF)."""
         self._exigir_padres([parent_id], como_404=False)
+        if mime is None:
+            ext = nombre.rsplit(".", 1)[1].lower() if "." in nombre.strip(".") else ""
+            mime = _MIME_POR_EXTENSION.get(ext, "application/pdf")
         return self._nuevo_archivo(nombre, [parent_id], contenido, mime, id)["id"]
 
     def obtener(self, id: str) -> dict:
