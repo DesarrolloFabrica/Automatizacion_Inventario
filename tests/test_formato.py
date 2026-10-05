@@ -47,6 +47,42 @@ class TestFormato(unittest.TestCase):
         self.assertFalse(resumen.ok())
         self.assertFalse(self.fake.obtener(jpg)["trashed"])
 
+    def test_pdf_llamado_png_solo_se_renombra(self):
+        pdf = self.fake.agregar_archivo("G1_soyunaimagen.png", self.raiz, contenido=b"%PDF-1.7", mime="application/pdf")
+        resumen = convertir_arbol(self.fake, self.raiz)
+        self.assertTrue(resumen.ok())
+        self.assertEqual((resumen.convertidos, resumen.renombrados), (0, 1))
+        reg = self.fake.obtener(pdf)
+        self.assertEqual((reg["name"], reg["mimeType"], reg["trashed"]), ("G1_soyunaimagen.pdf", "application/pdf", False))
+        self.assertEqual(self.fake.contenido(pdf), b"%PDF-1.7")  # el contenido no se toca
+        self.assertIn("renombrado(s) a su formato real", resumen.texto())
+
+    def test_extension_pegada_de_un_clon_viejo_se_corrige(self):
+        png = self.fake.agregar_archivo("G1_soyunaimagenpng.png", self.raiz, contenido=b"png", mime="image/png")
+        convertir_arbol(self.fake, self.raiz)
+        self.assertEqual(self.fake.obtener(png)["name"], "G1_soyunaimagen.png")
+
+    def test_png_convertido_conserva_el_vinculo_con_el_origen(self):
+        origen = self.fake.agregar_carpeta("Origen")
+        jpg = self.fake.files().copy(
+            fileId=self.fake.agregar_archivo("foto.JPG", origen, contenido=_jpg(), mime="image/jpeg"),
+            body={"name": "foto.png", "parents": [self.raiz], "properties": {"origen_id": "ORIGEN123"}},
+            fields="id",
+        ).execute()["id"]
+        resumen = convertir_arbol(self.fake, self.raiz)
+        self.assertTrue(resumen.ok())
+        vivos = [h for h in self.fake.hijos(self.raiz) if h["mimeType"] == "image/png"]
+        self.assertEqual(len(vivos), 1)
+        self.assertEqual(vivos[0]["name"], "foto.png")
+        self.assertEqual(vivos[0]["properties"], {"origen_id": "ORIGEN123"})
+        self.assertTrue(self.fake.obtener(jpg)["trashed"])
+
+    def test_nombre_bueno_no_hace_llamadas(self):
+        self.fake.agregar_archivo("G1_revista.pdf", self.raiz, contenido=b"%PDF", mime="application/pdf")
+        resumen = convertir_arbol(self.fake, self.raiz)
+        self.assertEqual((resumen.convertidos, resumen.renombrados), (0, 0))
+        self.assertEqual(self.fake.llamadas["update"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

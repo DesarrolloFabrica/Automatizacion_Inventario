@@ -9,7 +9,8 @@ from pathlib import Path
 
 from . import ROOT, drive
 from .drive import MIME_FOLDER
-from .nombres import nombre_canonico, requiere_formato
+from .nombres import es_jpeg_real
+from .normalizacion import extension_real, nombre_final_de, origen_de
 
 # Qué extensiones son válidas dentro de cada tipo de carpeta.
 #
@@ -68,10 +69,11 @@ def _inventariar(svc, raiz_id: str) -> tuple[dict[str, dict], dict[str, str]]:
     return archivos, carpetas
 
 
-def _canon_ruta(ruta: str) -> str:
-    partes = ruta.split("/")
-    partes[-1] = nombre_canonico(partes[-1])
-    return "/".join(partes)
+def _ruta_final(ruta: str, item: dict) -> str:
+    """Ruta con el NOMBRE FINAL del archivo (base limpia + extensión del formato real)."""
+    carpeta = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
+    nombre = nombre_final_de(item)
+    return f"{carpeta}/{nombre}" if carpeta else nombre
 
 
 def _lms_en_path() -> None:
@@ -82,9 +84,7 @@ def _lms_en_path() -> None:
 
 def _extension_real(item: dict) -> str:
     """Formato real del archivo (mimeType), la misma regla con la que se carga a GCP."""
-    _lms_en_path()
-    from generar_base_lms import obtener_extension
-    return obtener_extension(item)
+    return extension_real(item)
 
 
 def _describir(ext: str) -> str:
@@ -100,11 +100,18 @@ def _es_indexable(ruta: str, programa: str, meta: dict[str, str], parser=None) -
     return parser([programa, *ruta.split("/")], programa, meta) is not None
 
 
-def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: dict[str, str], parser=None, avance=None) -> ResultadoVerificacion:
+def verificar_lote(
+    svc, origen_id: str, clon_id: str, *, programa: str, meta: dict[str, str], parser=None, avance=None,
+    exigir_vinculo: bool = False,
+) -> ResultadoVerificacion:
     """
-    Compara el clon con el origen. `avance` es un callable(hechos, total, mensaje)
-    opcional que avisa por fases (total = 3: inventariar origen, inventariar clon
-    y comparar). Con `avance=None` no cambia nada.
+    Compara el clon con el origen por NOMBRE FINAL (formato real). `avance` es un
+    callable(hechos, total, mensaje) opcional que avisa por fases (total = 3:
+    inventariar origen, inventariar clon y comparar). Con `avance=None` no cambia nada.
+
+    Con `exigir_vinculo` (carga limpia a fabrica1) cada archivo del clon debe
+    traer en `properties` el ID de su archivo de origen, y ese ID debe ser el
+    del archivo que le corresponde: sin eso no hay ID ni fecha de origen que cargar.
     """
     def informar(hechos: int, mensaje: str) -> None:
         if avance is not None:
@@ -116,17 +123,32 @@ def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: di
     informar(1, "Inventariando clon")
     clon, _ = _inventariar(svc, clon_id)
     informar(2, "Comparando")
-    ori = Counter(_canon_ruta(r) for r in origen)
-    dst = Counter(_canon_ruta(r) for r in clon)
+    ori = Counter(_ruta_final(r, i) for r, i in origen.items())
+    dst = Counter(_ruta_final(r, i) for r, i in clon.items())
     for ruta, cantidad in sorted((ori - dst).items()):
         resultado.agregar(f"Falta en el clon: {ruta} ({cantidad}).")
     for ruta, cantidad in sorted((dst - ori).items()):
         resultado.agregar(f"Sobra en el clon: {ruta} ({cantidad}).")
+    # Dos archivos distintos del origen que al normalizar quedan con el mismo nombre.
+    nombres_por_final: dict[str, set[str]] = {}
+    for ruta, item in origen.items():
+        nombres_por_final.setdefault(_ruta_final(ruta, item), set()).add(item["name"])
+    for final, originales in sorted(nombres_por_final.items()):
+        if len(originales) > 1:
+            resultado.agregar(
+                f"Nombre repetido al normalizar: {', '.join(sorted(originales))} quedan como {final}. "
+                "Renombra uno en el origen."
+            )
     destino_por_canon = {}
+    destino_por_origen = {}
     for ruta, item in clon.items():
-        destino_por_canon.setdefault(_canon_ruta(ruta), []).append((ruta, item))
-        if requiere_formato(item["name"], item.get("mimeType")):
+        destino_por_canon.setdefault(_ruta_final(ruta, item), []).append((ruta, item))
+        if origen_de(item):
+            destino_por_origen.setdefault(origen_de(item), []).append((ruta, item))
+        if es_jpeg_real(item["name"], item.get("mimeType")):
             resultado.agregar(f"Quedó un JPG sin convertir: {ruta}.")
+        elif item["name"] != nombre_final_de(item):
+            resultado.agregar(f"Nombre sin normalizar: {ruta}; debe quedar {nombre_final_de(item)}.")
         padre = ruta.rsplit("/", 1)[0] if "/" in ruta else ""
         tipo = _tipo_material(padre.rsplit("/", 1)[-1]) if padre else None
         permitidas = EXTENSIONES_POR_TIPO.get(tipo or "")
@@ -141,15 +163,27 @@ def verificar_lote(svc, origen_id: str, clon_id: str, *, programa: str, meta: di
                 )
         if not _es_indexable(ruta, programa, meta, parser):
             resultado.agregar(f"Archivo no indexable: {ruta}.")
+    ids_origen = {item["id"] for item in origen.values()}
+    if exigir_vinculo:
+        for ruta, item in sorted(clon.items()):
+            vinculo = origen_de(item)
+            if not vinculo:
+                resultado.agregar(f"Sin vínculo con el origen: {ruta}. Vuelve a clonar en una carpeta nueva.")
+            elif vinculo not in ids_origen:
+                resultado.agregar(f"El vínculo con el origen no corresponde a este lote: {ruta}.")
     for ruta, item in origen.items():
-        pares = destino_por_canon.get(_canon_ruta(ruta), [])
+        # Primero por el ID guardado en la copia; si no lo tiene, por ruta y nombre final.
+        vinculados = destino_por_origen.get(item["id"], [])
+        pares = vinculados or destino_por_canon.get(_ruta_final(ruta, item), [])
         if not pares:
             continue
-        _, copia = pares.pop(0)
-        if requiere_formato(item["name"], item.get("mimeType")):
+        ruta_copia, copia = pares.pop(0)
+        if exigir_vinculo and vinculados and ruta_copia.rsplit("/", 1)[0] != _ruta_final(ruta, item).rsplit("/", 1)[0]:
+            resultado.agregar(f"Copia en otra carpeta: {ruta_copia}; su origen está en {ruta}.")
+        if es_jpeg_real(item["name"], item.get("mimeType")):
             # En el clon se convirtió: el contenido cambia a propósito, solo se exige que no esté vacío.
             if int(copia.get("size") or 0) <= 0:
-                resultado.agregar(f"PNG convertido sin contenido: {_canon_ruta(ruta)}.")
+                resultado.agregar(f"PNG convertido sin contenido: {_ruta_final(ruta, item)}.")
         elif item.get("md5Checksum") and (item.get("size"), item.get("md5Checksum")) != (copia.get("size"), copia.get("md5Checksum")):
             resultado.agregar(f"Contenido distinto al origen: {ruta}.")
     informar(3, resultado.texto())

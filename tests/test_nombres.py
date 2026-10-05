@@ -66,5 +66,50 @@ class TestNombres(unittest.TestCase):
                 self.assertEqual(nombres.nombre_png(nombre), esperado)
 
 
+class TestNombreFinal(unittest.TestCase):
+    """Base limpia + extensión del formato real (casos reales de fabrica, 2026-10-02)."""
+
+    def test_extension_pegada_sin_punto(self):
+        self.assertEqual(nombres.nombre_final("G1_soyunaimagenpng", "png"), "G1_soyunaimagen.png")
+
+    def test_extension_pegada_y_repetida(self):
+        self.assertEqual(nombres.nombre_final("G1_soyunaimagenpng.png", "png"), "G1_soyunaimagen.png")
+
+    def test_formato_errado_manda_el_real(self):
+        self.assertEqual(nombres.nombre_final("G1_soyunaimagen.png", "pdf"), "G1_soyunaimagen.pdf")
+        self.assertEqual(nombres.nombre_final("G1_soyunaimagenpng", "pdf"), "G1_soyunaimagen.pdf")
+
+    def test_doble_extension(self):
+        self.assertEqual(nombres.nombre_final("G1_infografia.png.pdf", "pdf"), "G1_infografia.pdf")
+
+    def test_separador_antes_de_la_extension(self):
+        self.assertEqual(nombres.nombre_final("G1_mapa_png", "png"), "G1_mapa.png")
+        self.assertEqual(nombres.nombre_final("G1_mapa .PNG", "png"), "G1_mapa.png")
+
+    def test_jpg_convertido(self):
+        self.assertEqual(nombres.nombre_final("pieza_01.JPG", "png"), "pieza_01.png")
+
+    def test_nombre_correcto_no_cambia(self):
+        for nombre, ext in (("G1_revista.pdf", "pdf"), ("G4_REVISTA_APRENDIZAJE_POR_TRANSFERENCIA.pdf", "pdf"),
+                            ("01_Quiz.quiz", "quiz"), ("G2_v1.2.mp4", "mp4")):
+            self.assertEqual(nombres.nombre_final(nombre, ext), nombre if nombre.endswith("." + ext) else f"{nombre}.{ext}")
+
+    def test_sin_extension_real_no_se_toca(self):
+        self.assertEqual(nombres.nombre_final("Actividad de aprendizaje", ""), "Actividad de aprendizaje")
+
+    def test_palabras_que_parecen_extension_no_se_cortan(self):
+        # "ai" o "doc" pegados al final son parte de palabras normales.
+        self.assertEqual(nombres.nombre_final("G1_Hawai", "pdf"), "G1_Hawai.pdf")
+        self.assertEqual(nombres.nombre_final("G1_protocolo_doc", "pdf"), "G1_protocolo_doc.pdf")
+
+    def test_no_deja_el_nombre_vacio(self):
+        self.assertEqual(nombres.nombre_final("png", "png"), "png.png")
+
+    def test_es_idempotente(self):
+        for nombre, ext in (("G1_soyunaimagenpng", "png"), ("a.png.pdf", "pdf"), ("x_png", "png")):
+            una = nombres.nombre_final(nombre, ext)
+            self.assertEqual(nombres.nombre_final(una, ext), una)
+
+
 if __name__ == "__main__":
     unittest.main()

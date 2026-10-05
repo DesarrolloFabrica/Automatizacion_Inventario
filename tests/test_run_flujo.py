@@ -106,7 +106,7 @@ class BaseRunFlujo(unittest.TestCase):
         self.fake.agregar_archivo("pieza_02.jpeg", ORIGEN_B, contenido=b"jpg2", mime="image/jpeg")
         self.fake.agregar_carpeta("LMS_Carga", id=RAIZ)
         self.svc = self.fake  # lo que devuelve construir_servicio (se puede envolver)
-        self.db = BaseFalsa(esquemas=("fabrica", "fabrica_pruebas"))
+        self.db = BaseFalsa(esquemas=("fabrica", "fabrica_pruebas", "fabrica1"))
         self.resumenes: list[clonacion.ResumenClon] = []
         self.salida = io.StringIO()
 
@@ -228,7 +228,7 @@ class TestCorridaFeliz(BaseRunFlujo):
             datos["corridas"][0]["argumentos"],
             {
                 "excel": str(excel.resolve()),
-                "schema": "fabrica_pruebas",
+                "schema": "fabrica1",
                 "simular": False,
                 "forzar_carga": False,
                 "solo_prevalidar": False,
@@ -480,7 +480,7 @@ class TestParser(unittest.TestCase):
     def test_defaults(self):
         args = run_flujo.construir_parser().parse_args([])
         self.assertIsNone(args.excel)
-        self.assertEqual(args.schema, "fabrica_pruebas")  # pruebas, no producción
+        self.assertEqual(args.schema, "fabrica1")  # la base nueva y limpia, no fabrica
         self.assertFalse(args.simular)
         self.assertFalse(args.forzar_carga)
         self.assertFalse(args.solo_prevalidar)
@@ -520,7 +520,7 @@ class TestParser(unittest.TestCase):
         datos = run_flujo.argumentos_corrida(args, Path("C:/x/RUTAS.xlsx"))
         self.assertEqual(datos["rehacer"], list(run_flujo.PASOS))
         self.assertTrue(datos["forzar_carga"])
-        self.assertEqual(datos["schema"], "fabrica_pruebas")
+        self.assertEqual(datos["schema"], "fabrica1")
 
 
 # ---------------------------------------------------------------------------

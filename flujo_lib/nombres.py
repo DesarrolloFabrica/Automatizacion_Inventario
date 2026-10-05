@@ -74,6 +74,51 @@ def nombre_png(nombre: str) -> str:
     return f"{base(nombre)}.png"
 
 
+# Extensiones que, si quedaron pegadas al final del nombre, son restos de una
+# extensión y no parte del título ("G1_imagenpng" -> "G1_imagen"). Lista cerrada
+# a propósito: "ai", "doc" o "mov" aparecen al final de palabras normales.
+_PEGADAS = ("jpeg", "docx", "pptx", "pptm", "xlsx", "pdf", "png", "jpg", "gif",
+            "mp3", "mp4", "m4a", "wav", "zip", "txt")
+# Extensiones que se quitan si van tras un punto ("x.png.pdf" -> "x").
+_CONOCIDAS = frozenset(_PEGADAS) | {"ai", "csv", "doc", "ini", "mov", "ppt", "quiz",
+                                    "svg", "webm", "webp", "xls", "xml"}
+_SEPARADORES = "_- ."
+
+
+def _limpiar_base(nombre: str) -> str:
+    """Quita del final las extensiones viejas, con o sin punto, hasta que no quede ninguna."""
+    base = nombre.strip()
+    while True:
+        cabeza, punto, cola = base.rpartition(".")
+        if punto and cabeza.strip(_SEPARADORES) and cola.lower() in _CONOCIDAS:
+            base = cabeza.rstrip(_SEPARADORES)
+            continue
+        minus = base.lower()
+        pegada = next((e for e in _PEGADAS if minus.endswith(e)), None)
+        if pegada and base[: -len(pegada)].strip(_SEPARADORES):
+            base = base[: -len(pegada)].rstrip(_SEPARADORES)
+            continue
+        return base
+
+
+def nombre_final(nombre: str, extension_real: str) -> str:
+    """
+    Nombre con el que el archivo queda en el clon y en la base: base limpia + "."
+    + la extensión de su formato REAL (la decide el mimeType, no el nombre).
+
+    "G1_imagenpng" (png)      -> "G1_imagen.png"
+    "G1_imagenpng.png" (png)  -> "G1_imagen.png"
+    "G1_imagen.png" (pdf)     -> "G1_imagen.pdf"
+    "G1_imagen.png.pdf" (pdf) -> "G1_imagen.pdf"
+    Sin extensión real (documento de Google o tipo desconocido) no se toca.
+    Es idempotente: aplicarla al resultado devuelve el mismo nombre.
+    """
+    if not extension_real:
+        return nombre
+    base = _limpiar_base(nombre) or nombre.strip()
+    return f"{base}.{extension_real.lower()}"
+
+
 def nombre_canonico(nombre: str) -> str:
     """
     Base intacta + "." + extensión en minúscula; jpg/jpeg -> png.

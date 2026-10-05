@@ -7,6 +7,7 @@ import unittest
 from googleapiclient.errors import HttpError
 
 from flujo_lib import clonacion, drive
+from flujo_lib.normalizacion import PROPIEDAD_ORIGEN, nombre_final_de
 from tests.fake_drive import MIME_FOLDER, FakeDrive, hacer_http_error
 
 SILENCIO = lambda *_a, **_k: None  # noqa: E731
@@ -20,6 +21,20 @@ def _arbol(fake: FakeDrive, raiz_id: str, prefijo: str = "") -> dict[str, str]:
         if h["mimeType"] == MIME_FOLDER:
             salida[ruta + "/"] = "carpeta"
             salida.update(_arbol(fake, h["id"], ruta))
+        else:
+            salida[ruta] = h["md5Checksum"]
+    return salida
+
+
+def _arbol_final(fake: FakeDrive, raiz_id: str, prefijo: str = "") -> dict[str, str]:
+    """Como _arbol, pero con el nombre FINAL de cada archivo (así debe quedar el clon)."""
+    salida: dict[str, str] = {}
+    for h in fake.hijos(raiz_id):
+        nombre = h["name"] if h["mimeType"] == MIME_FOLDER else nombre_final_de(h)
+        ruta = f"{prefijo}/{nombre}" if prefijo else nombre
+        if h["mimeType"] == MIME_FOLDER:
+            salida[ruta + "/"] = "carpeta"
+            salida.update(_arbol_final(fake, h["id"], ruta))
         else:
             salida[ruta] = h["md5Checksum"]
     return salida
@@ -73,7 +88,9 @@ class TestClonacionCompleta(unittest.TestCase):
 
         resumen = _clonar(fake, origen, destino, log=lineas.append)
 
-        self.assertEqual(_arbol(fake, destino), _arbol(fake, origen))
+        # El clon queda con los nombres finales: pieza_01.JPG nace como pieza_01.png.
+        self.assertEqual(_arbol(fake, destino), _arbol_final(fake, origen))
+        self.assertIn("pieza_01.png", _arbol(fake, destino))
         self.assertEqual(_foto(fake, origen), foto_antes)  # el origen no cambió
         self.assertTrue(resumen.ok())
         self.assertEqual(resumen.carpetas_nuevas, n_carpetas)
@@ -119,7 +136,7 @@ class TestClonacionCompleta(unittest.TestCase):
         self.assertEqual(fake.llamadas["copy"], copias_antes)
         self.assertEqual(fake.llamadas["create"], creaciones_antes)
         self.assertEqual(fake.llamadas["update"], 0)
-        self.assertEqual(_arbol(fake, destino), _arbol(fake, origen))
+        self.assertEqual(_arbol(fake, destino), _arbol_final(fake, origen))
         self.assertIn("  [archivo] readme.pdf (ya existe, omito)", lineas)
         self.assertIn("  [carpeta] A (reanudar)", lineas)
 
@@ -175,8 +192,9 @@ class TestClonacionCompleta(unittest.TestCase):
         self.assertIn("  [archivo] pieza_01.JPG (ya existe, omito)", lineas)
         self.assertIn("  [archivo] foto.jpeg (ya existe, omito)", lineas)
 
-    def test_d2_jpg_pendiente_se_copia_con_su_nombre_original(self):
-        # Solo uno de los dos JPG ya tiene PNG en el clon: se copia el otro tal cual.
+    def test_d2_jpg_pendiente_se_copia_con_su_nombre_final(self):
+        # Solo uno de los dos JPG ya tiene PNG en el clon: el otro se copia ya con
+        # su nombre final (.png); el paso de formato convierte el contenido.
         fake = FakeDrive()
         origen = fake.agregar_carpeta("ORIGEN")
         fake.agregar_archivo("pieza_01.JPG", origen, mime="image/jpeg")
@@ -188,7 +206,7 @@ class TestClonacionCompleta(unittest.TestCase):
 
         self.assertEqual(resumen.archivos_copiados, 1)
         self.assertEqual(resumen.archivos_omitidos, 1)
-        self.assertEqual(sorted(h["name"] for h in fake.hijos(destino)), ["pieza_01.png", "pieza_02.JPG"])
+        self.assertEqual(sorted(h["name"] for h in fake.hijos(destino)), ["pieza_01.png", "pieza_02.png"])
         self.assertEqual(_en_papelera(fake, destino), set())
 
 
@@ -357,6 +375,63 @@ class _DriveConCopiaProhibida:
 
     def about(self):
         return self._fake.about()
+
+
+class TestNombreFinalYVinculo(unittest.TestCase):
+    """Recarga limpia: el clon nace con el nombre del formato real y sabe de qué archivo salió."""
+
+    def _origen(self, fake):
+        origen = fake.agregar_carpeta("ORIGEN")
+        ids = {
+            "pegada": fake.agregar_archivo("G1_soyunaimagenpng", origen, contenido=b"png", mime="image/png"),
+            "doble": fake.agregar_archivo("G2_imagenpng.png", origen, contenido=b"png2", mime="image/png"),
+            "pdf": fake.agregar_archivo("G3_soyunaimagen.png", origen, contenido=b"%PDF", mime="application/pdf"),
+            "gdoc": fake.agregar_archivo(
+                "Actividad 1", origen, contenido=b"", mime="application/vnd.google-apps.document"),
+        }
+        return origen, ids
+
+    def test_copia_con_nombre_final_y_guarda_el_origen(self):
+        fake = FakeDrive()
+        origen, ids = self._origen(fake)
+        destino = fake.agregar_carpeta("DESTINO")
+
+        resumen = _clonar(fake, origen, destino)
+
+        self.assertTrue(resumen.ok())
+        por_nombre = {h["name"]: h for h in fake.hijos(destino)}
+        self.assertEqual(
+            sorted(por_nombre),
+            ["Actividad 1", "G1_soyunaimagen.png", "G2_imagen.png", "G3_soyunaimagen.pdf"],
+        )
+        esperado = {"G1_soyunaimagen.png": "pegada", "G2_imagen.png": "doble",
+                    "G3_soyunaimagen.pdf": "pdf", "Actividad 1": "gdoc"}
+        for nombre, clave in esperado.items():
+            self.assertEqual(por_nombre[nombre]["properties"][PROPIEDAD_ORIGEN], ids[clave])
+
+    def test_reanudar_no_vuelve_a_copiar_los_renombrados(self):
+        fake = FakeDrive()
+        origen, _ = self._origen(fake)
+        destino = fake.agregar_carpeta("DESTINO")
+        _clonar(fake, origen, destino)
+        copias = fake.llamadas["copy"]
+
+        resumen = _clonar(fake, origen, destino)
+
+        self.assertEqual(resumen.archivos_copiados, 0)
+        self.assertEqual(resumen.archivos_omitidos, 4)
+        self.assertEqual(resumen.archivos_duplicados_quitados, 0)
+        self.assertEqual(fake.llamadas["copy"], copias)
+
+    def test_el_log_muestra_el_cambio_de_nombre(self):
+        fake = FakeDrive()
+        origen, _ = self._origen(fake)
+        destino = fake.agregar_carpeta("DESTINO")
+        lineas: list[str] = []
+
+        _clonar(fake, origen, destino, log=lineas.append)
+
+        self.assertIn("  [archivo] G3_soyunaimagen.png → G3_soyunaimagen.pdf", lineas)
 
 
 if __name__ == "__main__":

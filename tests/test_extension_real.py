@@ -91,6 +91,7 @@ class ExtensionRealTest(unittest.TestCase):
 class SinExtensionTest(unittest.TestCase):
     def test_sin_extension_se_guarda_vacia(self):
         """"sin_extension" no cabe en extension.tipo (varchar(10)); se usa '' como los ya cargados."""
+        self.assertEqual(lms.normalizar_extension("sin_extension"), "")
         carga, _ = gcp._heredados()
         pedidos = []
 
@@ -147,7 +148,7 @@ class ConversionPorFormatoRealTest(unittest.TestCase):
         png = self.fake.agregar_archivo("G1_PORTADA.jpg", self.raiz, contenido=b"png", mime="image/png")
         resumen = convertir_arbol(self.fake, self.raiz)
         self.assertTrue(resumen.ok())
-        self.assertEqual(resumen.convertidos, 1)
+        self.assertEqual((resumen.convertidos, resumen.renombrados), (0, 1))
         self.assertEqual(self.fake.obtener(png)["name"], "G1_PORTADA.png")  # mismo archivo, sin recodificar
         self.assertEqual(self.fake.contenido(png), b"png")
 
@@ -169,7 +170,9 @@ class VerificacionPorFormatoRealTest(unittest.TestCase):
     def test_pdf_llamado_png_en_portada_es_diferencia(self):
         resultado = self.verificar("PORTADA MATERIA", "PORTADA.png", "application/pdf")
         self.assertEqual(resultado.estado, "con_diferencias")
-        self.assertIn("el archivo es «pdf»", resultado.hallazgos[0])
+        # El clon debía quedar como PORTADA.pdf y además un PDF no va en PORTADA MATERIA.
+        self.assertTrue(any("el archivo es «pdf»" in h for h in resultado.hallazgos), resultado.hallazgos)
+        self.assertTrue(any("debe quedar PORTADA.pdf" in h for h in resultado.hallazgos), resultado.hallazgos)
 
     def test_png_real_en_portada_es_ok(self):
         self.assertEqual(self.verificar("PORTADA MATERIA", "PORTADA.png", "image/png").estado, "ok")

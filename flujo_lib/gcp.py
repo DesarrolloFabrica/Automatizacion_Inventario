@@ -13,6 +13,17 @@ borran esos 120 y se insertan los 150 → quedan 530.
 Solo se borran filas de `archivo`. Las dimensiones (escuela, programa, materia,
 gránulo) se conservan y se reutilizan, así los identificadores se mantienen
 estables entre cargas.
+
+ESQUEMA LIMPIO (fabrica1, recarga desde cero, 2026-10-02)
+Todo esquema que no sea `fabrica` ni `fabrica_pruebas` se trata como limpio:
+  - No hay reemplazo por programa: nada se borra. Un archivo cuyo ID de origen
+    ya está cargado se omite (no se duplica).
+  - Cada fila lleva `origen_id` (ID del archivo en el Drive ORIGEN) y
+    `fecha_origen` (cuándo se subió ese archivo al Drive origen). Las columnas
+    se crean con LMS_Fabrica/migraciones/fabrica1_001_origen_archivo.sql.
+  - Los IDs salen de las secuencias y el programa se busca por escuela + nombre.
+  - Antes de conectar se revisa que todas las filas estén completas; si alguna
+    no lo está no se carga nada y se dice cuál.
 """
 
 from __future__ import annotations
@@ -20,9 +31,53 @@ from __future__ import annotations
 import os, re, sys
 from datetime import datetime, timezone
 
-from . import ROOT
+from . import ROOT, drive
+from .drive import MIME_FOLDER
+from .mensajes import ErrorFlujo
 
 _SCHEMA_RE = re.compile(r"[a-z_][a-z0-9_]*")
+# Esquemas con datos de antes de la recarga: se cargan como siempre.
+ESQUEMAS_LEGADOS = frozenset({"fabrica", "fabrica_pruebas"})
+# Fecha de Drive que se guarda como fecha_origen: cuándo se subió (creó) el
+# archivo en el Drive origen. La lista de Drive muestra la de modificación
+# (modifiedTime); si se prefiere esa, basta con cambiar este valor.
+CAMPO_FECHA_ORIGEN = "createdTime"
+MIGRACION_ORIGEN = "LMS_Fabrica/migraciones/fabrica1_001_origen_archivo.sql"
+LIMITE_CODIGO_GRANULO = 200  # granulo.codigo se amplía para conservar el nombre original
+LIMITE_EXTENSION = 10  # extension.tipo sigue siendo varchar(10)
+# Tablas de fabrica1 con secuencia propia (recurso_moodle la usa el trigger).
+TABLAS_CON_SECUENCIA = ("archivo", "cliente", "destinatario", "escuela", "extension", "granulo",
+                        "materia", "paquete", "periodo", "programa", "raiz", "recurso_moodle")
+# Una misma escuela con dos nombres en el Drive origen: la carga limpia usa
+# siempre el oficial (decidido por Camilo el 2026-10-05). PRODUCTO la llama
+# ESCUELA_TRANSFORMACION_EMPRESARIAL; TANIA y REGISTRO_CALIFICADO, con "DE_".
+ESCUELAS_EQUIVALENTES = {
+    "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL": "ESCUELA_TRANSFORMACION_EMPRESARIAL",
+}
+
+
+def escuela_oficial(nombre: str) -> str:
+    """Nombre oficial de la escuela (ya normalizado con norm_text)."""
+    return ESCUELAS_EQUIVALENTES.get(nombre, nombre)
+
+
+def es_esquema_limpio(schema: str) -> bool:
+    """True para la base nueva (fabrica1): sin reemplazo, con IDs de secuencia y columnas de origen."""
+    return schema not in ESQUEMAS_LEGADOS
+
+
+def inventario_origen(svc, origen_id: str, *, listar=None) -> dict[str, dict]:
+    """ID de cada archivo del origen -> su metadata (nombre original, fechas…). Solo lee."""
+    listar = listar or drive.listar_hijos
+    salida: dict[str, dict] = {}
+    pendientes = [origen_id]
+    while pendientes:
+        for hijo in listar(svc, pendientes.pop()):
+            if hijo.get("mimeType") == MIME_FOLDER:
+                pendientes.append(hijo["id"])
+            else:
+                salida[hijo["id"]] = hijo
+    return salida
 
 
 def _heredados():
@@ -33,13 +88,19 @@ def _heredados():
     return cargar_base_gcp, generar_base_rutas
 
 
-def escanear_lote(svc, destino_id: str, lote, destino_nombre: str, *, avance=None) -> list[dict]:
+def escanear_lote(
+    svc, destino_id: str, lote, destino_nombre: str, *, avance=None, con_origen: bool = False,
+) -> list[dict]:
     """
     Devuelve filas desnormalizadas indexables del clon resuelto.
 
     `avance` es un callable(hechos, total, mensaje) opcional: primero avisa que se
     está escaneando (total desconocido) y luego avanza por cada registro que se
     convierte en fila. Con `avance=None` no cambia nada.
+
+    Con `con_origen` (esquema limpio) se inventaría también el origen del lote y
+    cada fila lleva `origen_id`, `fecha_origen` y, como nombre original, el que
+    tiene el archivo en el origen ("G1_imagenpng"), no el ya normalizado del clon.
     """
     _, rutas = _heredados()
     meta = {"cliente": lote.cliente_gcp, "raiz": lote.raiz_gcp}
@@ -49,6 +110,7 @@ def escanear_lote(svc, destino_id: str, lote, destino_nombre: str, *, avance=Non
     if avance is not None:
         avance(0, 0, "Escaneando el clon")
     registros = rutas.escanear_ruta_drive(svc, destino_id, meta)
+    origenes = inventario_origen(svc, lote.origen_id) if con_origen else {}
     ahora = datetime.now(timezone.utc).isoformat()
     total = len(registros)
     if avance is not None:
@@ -77,7 +139,84 @@ def escanear_lote(svc, destino_id: str, lote, destino_nombre: str, *, avance=Non
             "archivo_activo": reg.get("archivo_activo", "true"),
             "extension_tipo": reg.get("extension") or "",  # vacía = sin extensión (Google Docs), como en GCP
         })
+        if con_origen:
+            filas[-1]["escuela_nombre"] = escuela_oficial(filas[-1]["escuela_nombre"])
+            origen = origenes.get(reg.get("origen_id") or "") or {}
+            filas[-1]["origen_id"] = reg.get("origen_id") or ""
+            filas[-1]["fecha_origen"] = origen.get(CAMPO_FECHA_ORIGEN) or ""
+            if origen.get("name"):
+                filas[-1]["archivo_nombre_original"] = origen["name"]
     return filas
+
+
+def problemas_filas_limpias(filas: list[dict]) -> list[str]:
+    """Lo que impide cargar una fila en el esquema limpio (vacío = todo bien)."""
+    problemas: list[str] = []
+    vistos: dict[str, str] = {}
+    for fila in filas:
+        nombre = fila.get("archivo_nombre") or "(sin nombre)"
+        ruta = "/".join(
+            str(fila.get(c) or "") for c in ("programa_nombre", "materia_nombre") if fila.get(c)
+        )
+        etiqueta = f"{ruta}/{nombre}" if ruta else nombre
+        origen = str(fila.get("origen_id") or "")
+        if not origen:
+            problemas.append(f"{etiqueta}: no se sabe de qué archivo del origen salió.")
+        elif origen in vistos:
+            problemas.append(f"{etiqueta}: el mismo archivo de origen ya viene como {vistos[origen]}.")
+        else:
+            vistos[origen] = etiqueta
+        if origen and not fila.get("fecha_origen"):
+            problemas.append(f"{etiqueta}: no se encontró la fecha de subida en el origen.")
+        for campo, que in (("escuela_nombre", "escuela"), ("programa_nombre", "programa"),
+                           ("materia_nombre", "materia"), ("granulo_codigo", "código de gránulo")):
+            if not str(fila.get(campo) or "").strip():
+                problemas.append(f"{etiqueta}: falta {que}.")
+        if len(str(fila.get("granulo_codigo") or "")) > LIMITE_CODIGO_GRANULO:
+            problemas.append(
+                f"{etiqueta}: el código de gránulo «{fila['granulo_codigo']}» pasa de "
+                f"{LIMITE_CODIGO_GRANULO} caracteres."
+            )
+        if len(str(fila.get("extension_tipo") or "")) > LIMITE_EXTENSION:
+            problemas.append(
+                f"{etiqueta}: la extensión «{fila['extension_tipo']}» pasa de {LIMITE_EXTENSION} caracteres."
+            )
+    return problemas
+
+
+def _realinear_secuencias(cur, schema: str) -> None:
+    """
+    Deja cada secuencia justo después del MAX(id) real de su tabla.
+
+    Las secuencias de PostgreSQL no retroceden con un ROLLBACK: si una carga
+    falló a medias, los números que gastó quedarían como huecos. Realinear al
+    empezar mantiene los IDs seguidos (1, 2, 3…). El LOCK de archivo hace que
+    dos cargas a la vez se esperen en vez de pisarse.
+    """
+    cur.execute(f"LOCK TABLE {schema}.archivo IN SHARE ROW EXCLUSIVE MODE")
+    for tabla in TABLAS_CON_SECUENCIA:
+        cur.execute(
+            f"SELECT setval(pg_get_serial_sequence('{schema}.{tabla}', 'id'), "
+            f"COALESCE((SELECT MAX(id) FROM {schema}.{tabla}), 0) + 1, false)"
+        )
+
+
+def _exigir_columnas_origen(cur, schema: str) -> None:
+    """La tabla archivo del esquema limpio debe tener origen_id y fecha_origen."""
+    cur.execute(
+        """SELECT column_name FROM information_schema.columns
+           WHERE table_schema = %s AND table_name = 'archivo'
+             AND column_name IN ('origen_id', 'fecha_origen')""",
+        (schema,),
+    )
+    presentes = {str(r[0]) for r in cur.fetchall() or []}
+    faltan = sorted({"origen_id", "fecha_origen"} - presentes)
+    if faltan:
+        raise ErrorFlujo(
+            f"La tabla archivo de {schema} no tiene las columnas {', '.join(faltan)}.",
+            f"Ejecuta {MIGRACION_ORIGEN} en la base y vuelve a ejecutar.",
+            paso="carga",
+        )
 
 
 def programas_de(filas: list[dict]) -> list[str]:
@@ -160,7 +299,7 @@ def conectar_desde_env(env=os.environ):
 def cargar_lote(
     filas: list[dict],
     *,
-    schema: str = "fabrica_pruebas",
+    schema: str = "fabrica1",
     simular: bool = False,
     reemplazar: bool = True,
     conectar=conectar_desde_env,
@@ -174,11 +313,26 @@ def cargar_lote(
     de los programas del lote y luego se insertan las actuales. Si el escaneo no
     encontró nada, no se borra nada: nunca se vacía un programa por error.
 
+    En un esquema limpio (fabrica1) `reemplazar` no aplica: ver el docstring del
+    módulo. Si alguna fila está incompleta se lanza ErrorFlujo sin conectar.
+
     `avance` es un callable(hechos, total, mensaje) opcional con total = len(filas)
     que avanza por cada fila procesada. Con `avance=None` no cambia nada.
     """
     if not _SCHEMA_RE.fullmatch(schema or ""):
         raise ValueError(f"Esquema no válido: {schema}")
+    limpio = es_esquema_limpio(schema)
+    if limpio:
+        reemplazar = False
+        problemas = problemas_filas_limpias(filas)
+        if problemas:
+            raise ErrorFlujo(
+                f"No se cargó nada: {len(problemas)} problema(s) en los datos del lote. "
+                f"Primero: {problemas[0]}",
+                "Corrige esos archivos en el origen o en el clon y vuelve a ejecutar la carga.",
+                paso="carga",
+                detalle="\n".join(problemas),
+            )
     programas = programas_de(filas)
     hechos = 0
 
@@ -207,11 +361,15 @@ def cargar_lote(
         return stats
     carga, _ = _heredados()
     carga.SCHEMA = schema
+    carga.USAR_SECUENCIAS = limpio
     conexion = conectar()
     cache = {}
     try:
         with conexion:
             with conexion.cursor() as cur:
+                if limpio:
+                    _exigir_columnas_origen(cur, schema)
+                    _realinear_secuencias(cur, schema)
                 # Reemplazo: fuera lo viejo del programa antes de meter lo nuevo.
                 # Si no hay filas que cargar no se borra nada (un escaneo vacío no
                 # puede dejar el programa sin datos).
@@ -226,7 +384,9 @@ def cargar_lote(
                     if not enlace:
                         avanzar(fila)
                         continue
-                    if carga.buscar_archivo_id(cur, enlace) is not None:
+                    if carga.buscar_archivo_id(cur, enlace) is not None or (
+                        limpio and _origen_cargado(cur, schema, fila["origen_id"])
+                    ):
                         stats["existentes"] += 1
                         avanzar(fila)
                         continue
@@ -240,6 +400,14 @@ def cargar_lote(
                     periodo_id = carga.get_or_create(cur, "periodo", "codigo", fila["periodo_codigo"], cache)
                     cliente_id = carga.get_or_create(cur, "cliente", "nombre", fila["cliente_nombre"], cache)
                     extension_id = carga.resolver_extension_id(cur, fila["extension_tipo"], cache)
+                    if limpio:
+                        _insertar_archivo_limpio(
+                            cur, schema, carga, fila, enlace,
+                            (granulo_id, raiz_id, destinatario_id, periodo_id, cliente_id, extension_id),
+                        )
+                        stats["insertados"] += 1
+                        avanzar(fila)
+                        continue
                     archivo_id = carga.next_id(cur, "archivo")
                     cur.execute(
                         f"""INSERT INTO {schema}.archivo (
@@ -258,3 +426,26 @@ def cargar_lote(
         return stats
     finally:
         conexion.close()
+
+
+def _origen_cargado(cur, schema: str, origen_id: str) -> bool:
+    """¿Ese archivo del Drive origen ya está en la base limpia?"""
+    cur.execute(f"SELECT id FROM {schema}.archivo WHERE origen_id = %s", (origen_id,))
+    return cur.fetchone() is not None
+
+
+def _insertar_archivo_limpio(cur, schema: str, carga, fila: dict, enlace: str, ids: tuple) -> int:
+    """INSERT de archivo en el esquema limpio: id de la secuencia y columnas de origen."""
+    cur.execute(
+        f"""INSERT INTO {schema}.archivo (
+        granulo_id, raiz_id, destinatario_id, periodo_id,
+        cliente_id, extension_id, nombre, nombre_original,
+        enlace, hash_sha256, fecha_registro, activo, origen_id, fecha_origen
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (*ids, carga.trunc(fila["archivo_nombre"]),
+         carga.trunc(fila["archivo_nombre_original"]), enlace,
+         fila.get("archivo_hash") or None, fila["archivo_fecha_registro"],
+         str(fila.get("archivo_activo", "true")).lower() in {"true", "1", "t"},
+         fila["origen_id"], fila["fecha_origen"]),
+    )
+    return int(cur.fetchone()[0])

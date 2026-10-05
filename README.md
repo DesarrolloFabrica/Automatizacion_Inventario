@@ -53,7 +53,7 @@ Todo sale del Excel; no hay parámetros por lote. El comando ejecuta el flujo co
 | Opción | Descripción |
 |---|---|
 | `--excel RUTA` | Ruta a `RUTAS.xlsx` (también variable `RUTAS_XLSX` o `RUTAS.xlsx` en la raíz). |
-| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica_pruebas` mientras se valida el flujo. Para producción: `--schema fabrica`. El run único no lee `LMS_SCHEMA`. |
+| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica1`, la base nueva y limpia (ver «Recarga limpia en fabrica1»). Los esquemas anteriores hay que pedirlos a mano: `--schema fabrica_pruebas` o `--schema fabrica`. El run único no lee `LMS_SCHEMA`. |
 | `--simular` | Ejecuta el flujo sin escribir en la base ni enviar correo. |
 | `--forzar-carga` | Permite cargar lotes con diferencias de verificación. Por defecto apagado. |
 | `--solo-prevalidar` | Ejecuta solo la prevalidación y termina. |
@@ -69,6 +69,38 @@ Salidas en `corridas/` (no versionado):
 - `corridas/<excel>.estado.xlsx`: el mismo estado en Excel, con colores por paso
   y columnas "Qué pasó" / "Qué hacer" (se adjuntará al correo final).
 - `corridas/logs/<id_corrida>_<excel>.log`: log de cada corrida con el detalle técnico.
+
+### Recarga limpia en fabrica1
+
+`fabrica` quedó con datos mal cargados: extensiones tomadas del nombre (decía
+`.png` y era PDF) y nombres sin punto (`G1_imagenpng`). Por eso todo se vuelve a
+clonar a una carpeta nueva y se carga en `fabrica1`, con estas reglas:
+
+- **Formato real**: la extensión sale del tipo del archivo (mimeType), nunca del nombre.
+- **Nombre normalizado** (`flujo_lib/nombres.nombre_final`): base limpia + extensión
+  real. `G1_imagenpng` → `G1_imagen.png`; `G1_imagenpng.png` → `G1_imagen.png`;
+  `G1_imagen.png` que es PDF → `G1_imagen.pdf`. Los JPEG quedan en PNG. La copia
+  nace con ese nombre; el nombre del origen se guarda en `nombre_original`.
+- **Vínculo con el origen**: cada copia guarda en `properties.origen_id` el ID del
+  archivo original. En la base van `origen_id` y `fecha_origen` (cuándo se subió
+  el original al Drive origen, `createdTime`). `fecha_registro` sigue siendo la
+  fecha de carga a la base.
+- **IDs limpios**: salen de las secuencias (realineadas al empezar cada carga, así
+  una carga fallida no deja huecos); el programa se identifica por escuela + nombre.
+- **Nada se borra**: no hay reemplazo por programa. Un archivo de origen ya cargado
+  se omite.
+- **Todo o nada por lote**: si una fila no tiene escuela, materia, código de
+  gránulo (máx. 10 caracteres) o vínculo con el origen, el lote no se carga y se
+  dice qué archivo falla.
+
+Antes de la primera carga hay que crear las dos columnas, una sola vez:
+
+```powershell
+psql "host=127.0.0.1 port=5432 dbname=planner_db user=planner_user" -f LMS_Fabrica/migraciones/fabrica1_001_origen_archivo.sql
+```
+
+La prevalidación avisa si faltan. Con `--schema fabrica` o `--schema fabrica_pruebas`
+la carga funciona como antes (reemplazo por programa, sin columnas de origen).
 
 ### Reanudación
 
@@ -293,8 +325,8 @@ LMS_SCHEMA=fabrica_pruebas
 ```
 
 `LMS_SCHEMA` solo lo usan los scripts de `LMS_Fabrica`. El run único carga al
-esquema de `--schema`. Por defecto es `fabrica_pruebas`: mientras se valida el
-flujo nada llega a producción salvo que se pida a mano con `--schema fabrica`.
+esquema de `--schema`. Por defecto es `fabrica1`, la base nueva; `fabrica`
+(producción anterior) solo se toca si se pide a mano con `--schema fabrica`.
 
 ### Token único (run único)
 

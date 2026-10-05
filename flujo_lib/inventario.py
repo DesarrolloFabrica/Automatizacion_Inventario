@@ -1,4 +1,4 @@
-"""Adaptador del inventario heredado con comparación por nombre canónico."""
+"""Adaptador del inventario heredado con comparación por nombre final (formato real)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import ROOT, drive
 from .drive import MIME_FOLDER
-from .nombres import nombre_canonico
+from .normalizacion import nombre_final_de
 
 
 def _cargar_heredados():
@@ -23,7 +23,7 @@ def generar_inventario(svc, trabajos: list[dict], salida: Path) -> Path:
     generar, _ = _cargar_heredados()
     def listar_canonico(servicio, carpeta_id):
         hijos = drive.listar_hijos(servicio, carpeta_id)
-        return [dict(h, name=h["name"] if h.get("mimeType") == MIME_FOLDER else nombre_canonico(h["name"])) for h in hijos]
+        return [dict(h, name=h["name"] if h.get("mimeType") == MIME_FOLDER else nombre_final_de(h)) for h in hijos]
     resultado = generar(svc, listar_canonico, trabajos, Path(salida))
     return Path(resultado[0] if isinstance(resultado, tuple) else resultado)
 

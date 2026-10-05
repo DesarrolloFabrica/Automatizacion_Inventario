@@ -98,7 +98,7 @@ python run_flujo.py --excel "<RUTA>\RUTAS.xlsx"
 | Parámetro | Descripción |
 |---|---|
 | `--excel` | Ruta a `RUTAS.xlsx` (también variable `RUTAS_XLSX` o `RUTAS.xlsx` en la raíz) |
-| `--schema` | Esquema de Cloud SQL. Por defecto `fabrica_pruebas`. Producción: `--schema fabrica`. No se lee `LMS_SCHEMA` |
+| `--schema` | Esquema de Cloud SQL. Por defecto `fabrica1` (recarga limpia, ver README). Anteriores: `--schema fabrica_pruebas` / `--schema fabrica`. No se lee `LMS_SCHEMA` |
 | `--simular` | Hace todo menos escribir en la base y enviar correo |
 | `--forzar-carga` | Permite cargar lotes con diferencias de verificación. Por defecto apagado |
 | `--solo-prevalidar` | Ejecuta la prevalidación y termina |

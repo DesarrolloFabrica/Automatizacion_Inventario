@@ -306,9 +306,13 @@
     }
 
     var nombreEsquema = (datos && datos.esquema) ? datos.esquema : 'desconocido';
-    // Cualquier esquema que no sea el de pruebas significa que se está
-    // escribiendo en producción: eso tiene que saltar a la vista.
-    if (nombreEsquema === 'fabrica_pruebas') {
+    // fabrica1 es la base nueva y limpia; fabrica_pruebas, la de pruebas.
+    // Cualquier otro esquema (fabrica) es la base anterior de producción:
+    // eso tiene que saltar a la vista.
+    if (nombreEsquema === 'fabrica1') {
+      esquema.textContent = 'Esquema: ' + nombreEsquema + ' (base nueva)';
+      esquema.classList.remove('salud__dato--peligro');
+    } else if (nombreEsquema === 'fabrica_pruebas') {
       esquema.textContent = 'Esquema: ' + nombreEsquema;
       esquema.classList.remove('salud__dato--peligro');
     } else {
@@ -1290,7 +1294,7 @@
         return responder({
           ok: true,
           cuenta: 'fabrica.contenidos@cun.edu.co',
-          esquema: parametros.get('esquema') || 'fabrica_pruebas'
+          esquema: parametros.get('esquema') || 'fabrica1'
         });
       },
 

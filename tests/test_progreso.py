@@ -330,7 +330,7 @@ class TestAvanceGcp(unittest.TestCase):
         espia = Espia()
         conexion = Conexion()
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
-            stats = gcp.cargar_lote(filas, conectar=lambda: conexion, avance=espia)
+            stats = gcp.cargar_lote(filas, schema="fabrica_pruebas", conectar=lambda: conexion, avance=espia)
         self.assertEqual(stats["insertados"], 5)
         self.assertEqual(espia.llamadas[0], (0, 5, "5 archivo(s) por cargar"))
         self.assertEqual([h for h, _t, _m in espia.llamadas], [0, 1, 2, 3, 4, 5])
@@ -341,13 +341,13 @@ class TestAvanceGcp(unittest.TestCase):
         espia = Espia()
         conexion = Conexion()
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
-            gcp.cargar_lote(filas, conectar=lambda: conexion, avance=espia)
+            gcp.cargar_lote(filas, schema="fabrica_pruebas", conectar=lambda: conexion, avance=espia)
         self.assertEqual(espia.ultima[:2], (2, 2))
 
     def test_simular_avanza_hasta_el_final_sin_conectar(self):
         espia = Espia()
         conectar = mock.Mock(side_effect=AssertionError("no debe conectar"))
-        gcp.cargar_lote([FILA, FILA], simular=True, conectar=conectar, avance=espia)
+        gcp.cargar_lote([FILA, FILA], schema="fabrica_pruebas", simular=True, conectar=conectar, avance=espia)
         self.assertEqual(espia.ultima, (2, 2, "Simulación: no se escribió en la base"))
         conectar.assert_not_called()
 

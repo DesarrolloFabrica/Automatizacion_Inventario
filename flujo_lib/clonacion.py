@@ -28,7 +28,8 @@ QUÉ SE CONSERVÓ (igual que el script original):
   - Nunca se escribe nada bajo origen_id: solo se lista.
 
 QUÉ CAMBIÓ (solo lo que pide el contrato del run único):
-  - Los ARCHIVOS se agrupan por nombres.nombre_canonico (base intacta,
+  - (Reemplazado el 2026-10-02 por el NOMBRE FINAL, ver abajo.) Los ARCHIVOS
+    se agrupaban por nombres.nombre_canonico (base intacta,
     extensión en minúscula, jpg/jpeg -> png) tanto en el índice del destino como
     en los cupos del origen y en los contadores visto/usados. Así "x.JPG" del
     origen se considera presente si el clon tiene "x.png" (ya convertido).
@@ -45,6 +46,14 @@ QUÉ CAMBIÓ (solo lo que pide el contrato del run único):
     ok() debe reflejar el estado final del clon).
   - Al quitar duplicados se registra en el log el nombre real del archivo (no
     solo el canónico) cuando se conoce.
+
+NOMBRE FINAL Y VÍNCULO CON EL ORIGEN (recarga limpia en fabrica1, 2026-10-02):
+  - La clave de los archivos ya no es el nombre canónico sino el NOMBRE FINAL
+    (normalizacion.nombre_final_de): base limpia + extensión del formato real.
+    La copia se crea directamente con ese nombre: "G1_xpng" (PNG) nace como
+    "G1_x.png" y "G1_x.png" que es PDF nace como "G1_x.pdf".
+  - Cada copia guarda en `properties.origen_id` el ID de su archivo de origen;
+    con eso la carga sabe de qué archivo salió (ID y fecha de subida del origen).
 """
 
 from __future__ import annotations
@@ -57,7 +66,7 @@ from googleapiclient.errors import HttpError
 
 from . import drive
 from .drive import MIME_FOLDER
-from .nombres import nombre_canonico
+from .normalizacion import PROPIEDAD_ORIGEN, nombre_final_de
 
 _ERRORES_RED = (
     http.client.IncompleteRead,
@@ -156,7 +165,7 @@ def indice_destino(s: _Sesion, parent_id: str) -> tuple[dict[str, list[str]], di
 
     Devuelve dos mapas nombre → lista de IDs:
       - carpetas: por nombre exacto (para reanudar o detectar duplicados)
-      - archivos: por nombre CANÓNICO (para omitir si ya está o contar cuántos hay)
+      - archivos: por NOMBRE FINAL (para omitir si ya está o contar cuántos hay)
 
     Varios IDs con el mismo nombre = posibles duplicados de corridas previas.
     """
@@ -168,7 +177,7 @@ def indice_destino(s: _Sesion, parent_id: str) -> tuple[dict[str, list[str]], di
         if mid == MIME_FOLDER:
             carpetas.setdefault(n, []).append(h["id"])
         else:
-            archivos.setdefault(nombre_canonico(n), []).append(h["id"])
+            archivos.setdefault(nombre_final_de(h), []).append(h["id"])
     return carpetas, archivos
 
 
@@ -244,6 +253,7 @@ def _copiar_archivo_sin_duplicar(
     destino_parent_id: str,
     dest_archivos: dict[str, list[str]],
     ruta: str,
+    original: str | None = None,
 ) -> None:
     """
     Copia un archivo al destino evitando duplicados tras timeouts.
@@ -252,12 +262,17 @@ def _copiar_archivo_sin_duplicar(
     la copia. Antes de reintentar se relee el índice; si la cantidad con
     ese nombre canónico aumentó, se cuenta éxito y NO se vuelve a copiar.
     Errores duros (400/401/403/404) → fallido sin reintentar.
-    `ruta` es la ruta relativa del archivo (para la lista de fallidos).
+    `nombre` es el NOMBRE FINAL con el que se crea la copia (también es la clave
+    del índice); `original` es el nombre en el origen si era distinto (para el
+    log). `ruta` es la ruta relativa del archivo (para la lista de fallidos).
     """
-    clave = nombre_canonico(nombre)
+    clave = nombre
     # Cuántos había con este nombre antes de intentar (para detectar "ya está").
     antes = len(dest_archivos.get(clave) or [])
-    s.log(f"  [archivo] {nombre}")
+    if original and original != nombre:
+        s.log(f"  [archivo] {original} → {nombre}")
+    else:
+        s.log(f"  [archivo] {nombre}")
     ultimo: Exception | None = None
     for intento in range(12):
         try:
@@ -265,7 +280,11 @@ def _copiar_archivo_sin_duplicar(
                 s.svc.files()
                 .copy(
                     fileId=origen_file_id,
-                    body={"name": nombre, "parents": [destino_parent_id]},
+                    body={
+                        "name": nombre,
+                        "parents": [destino_parent_id],
+                        "properties": {PROPIEDAD_ORIGEN: origen_file_id},
+                    },
                     fields="id",
                     supportsAllDrives=True,
                 )
@@ -325,7 +344,7 @@ def copiar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str =
     origen_hijos = s.listar(s.svc, origen_id)
     dest_carpetas, dest_archivos = indice_destino(s, destino_parent_id)
     cupo_a = Counter(
-        nombre_canonico(h["name"]) for h in origen_hijos if h.get("mimeType") != MIME_FOLDER
+        nombre_final_de(h) for h in origen_hijos if h.get("mimeType") != MIME_FOLDER
     )
     cupo_c = Counter(h["name"] for h in origen_hijos if h.get("mimeType") == MIME_FOLDER)
     visto: dict[str, int] = defaultdict(int)
@@ -345,7 +364,7 @@ def copiar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str =
                 s.resumen.carpetas_nuevas += 1
                 copiar_arbol(s, item["id"], nueva_id, _unir(ruta, nombre))
         else:
-            clave = nombre_canonico(nombre)
+            clave = nombre_final_de(item)
             if visto[clave] < len(dest_archivos.get(clave) or []):
                 s.log(f"  [archivo] {nombre} (ya existe, omito)")
                 s.resumen.archivos_omitidos += 1
@@ -353,7 +372,7 @@ def copiar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str =
                 s.informar(nombre)
                 continue
             _copiar_archivo_sin_duplicar(
-                s, item["id"], nombre, destino_parent_id, dest_archivos, _unir(ruta, nombre)
+                s, item["id"], clave, destino_parent_id, dest_archivos, _unir(ruta, nombre), nombre
             )
             visto[clave] += 1
             s.informar(nombre)
@@ -371,7 +390,7 @@ def igualar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str 
     n_ori_c = sum(1 for h in origen_hijos if h.get("mimeType") == MIME_FOLDER)
     dest_carpetas, dest_archivos = _esperar_indice(s, destino_parent_id, n_ori_a, n_ori_c)
     cupo_a = Counter(
-        nombre_canonico(h["name"]) for h in origen_hijos if h.get("mimeType") != MIME_FOLDER
+        nombre_final_de(h) for h in origen_hijos if h.get("mimeType") != MIME_FOLDER
     )
     cupo_c = Counter(h["name"] for h in origen_hijos if h.get("mimeType") == MIME_FOLDER)
     _quitar_duplicados_en_carpeta(s, destino_parent_id, cupo_a, cupo_c, dest_carpetas, dest_archivos)
@@ -380,13 +399,13 @@ def igualar_arbol(s: _Sesion, origen_id: str, destino_parent_id: str, ruta: str 
         nombre = item["name"]
         if item.get("mimeType") == MIME_FOLDER:
             continue
-        clave = nombre_canonico(nombre)
+        clave = nombre_final_de(item)
         if usados[clave] < len(dest_archivos.get(clave) or []):
             usados[clave] += 1
             continue
         s.log(f"  [completar archivo] {nombre}")
         _copiar_archivo_sin_duplicar(
-            s, item["id"], nombre, destino_parent_id, dest_archivos, _unir(ruta, nombre)
+            s, item["id"], clave, destino_parent_id, dest_archivos, _unir(ruta, nombre), nombre
         )
         usados[clave] += 1
         # La segunda pasada no suma: cada archivo del origen ya se contó en la primera.
@@ -433,7 +452,7 @@ def clonar_arbol(
     Clona (o resincroniza) el contenido de origen_id dentro de destino_id.
 
     1) copiar_arbol recursivo y 2) igualar_arbol, exactamente como el script
-    original, comparando archivos por nombre canónico. Nunca escribe bajo el origen.
+    original, comparando archivos por nombre final. Nunca escribe bajo el origen.
     Si se dejan `ejecutar` y `listar` por defecto, usan el mismo `dormir` (así las
     pruebas no esperan de verdad). Devuelve ResumenClon; no lanza por archivos
     que no se pudieron copiar (quedan en `fallidos`), sí por errores de Drive al

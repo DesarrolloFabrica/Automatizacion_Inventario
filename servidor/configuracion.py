@@ -67,7 +67,7 @@ def cargar(env: Mapping[str, str] | None = None) -> Configuracion:
     ruta_sa = (env.get("GOOGLE_SA_JSON") or "").strip()
 
     return Configuracion(
-        schema=(env.get("SCHEMA_POR_DEFECTO") or env.get("LMS_SCHEMA") or "fabrica_pruebas").strip(),
+        schema=(env.get("SCHEMA_POR_DEFECTO") or env.get("LMS_SCHEMA") or "fabrica1").strip(),
         almacen=almacen,
         dir_corridas=Path((env.get("DIR_CORRIDAS") or str(ROOT / "corridas")).strip()),
         simular_por_defecto=_verdadero(env.get("SIMULAR_POR_DEFECTO"), True),

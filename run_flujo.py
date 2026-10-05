@@ -23,7 +23,7 @@ Uso (PowerShell, desde la raíz del repo):
   python run_flujo.py --excel "<RUTA>\\RUTAS.xlsx" --rehacer clonacion
   python run_flujo.py --excel "<RUTA>\\RUTAS.xlsx" --simular --no-interactivo
 
-Opciones: --schema (default fabrica_pruebas; producción: --schema fabrica),
+Opciones: --schema (default fabrica1, la base nueva y limpia; antes: fabrica_pruebas / fabrica),
 --simular, --forzar-carga,
 --solo-prevalidar, --rehacer {destino,clonacion,formato,verificacion,carga,todo}
 (repetible) y --no-interactivo. Si hay que autorizar Google de nuevo:
@@ -54,7 +54,7 @@ from flujo_lib.destino import describir, resolver_destino  # noqa: E402
 from flujo_lib.estado import DIR_CORRIDAS, ETIQUETAS_ESTADO, PASOS, EstadoCorrida  # noqa: E402
 from flujo_lib.excel import Lote, resolver_excel  # noqa: E402
 from flujo_lib.formato import convertir_arbol  # noqa: E402
-from flujo_lib.gcp import cargar_lote, escanear_lote  # noqa: E402
+from flujo_lib.gcp import cargar_lote, es_esquema_limpio, escanear_lote  # noqa: E402
 from flujo_lib.inventario import generar_inventario, publicar_inventario  # noqa: E402
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion  # noqa: E402
 from flujo_lib.notificar import construir_mensaje, enviar_correo  # noqa: E402
@@ -63,9 +63,10 @@ from flujo_lib.progreso import Reporte  # noqa: E402
 from flujo_lib.verificacion import verificar_lote  # noqa: E402
 
 SCHEMA_PRODUCCION = "fabrica"
-# Mientras se valida el run único se carga al esquema de pruebas.
-# Para producción hay que pedirlo a mano: --schema fabrica.
-SCHEMA_DEFECTO = "fabrica_pruebas"
+# Recarga desde cero (2026-10-02): todo va a fabrica1, la base nueva y limpia
+# (formato real, IDs de secuencia, ID y fecha de subida del archivo de origen).
+# fabrica y fabrica_pruebas siguen disponibles a mano con --schema.
+SCHEMA_DEFECTO = "fabrica1"
 PASOS_REHACER = PASOS + ("todo",)
 NOTA_OMITIDO = "No se ejecutó porque falló el paso anterior"
 NOTA_CANCELADO = "No se ejecutó: la corrida se canceló"
@@ -105,8 +106,8 @@ def construir_parser() -> argparse.ArgumentParser:
         "--schema",
         default=SCHEMA_DEFECTO,
         help=(
-            f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, el de pruebas). "
-            f"Para producción hay que indicarlo a mano: --schema {SCHEMA_PRODUCCION}."
+            f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, la base nueva). "
+            f"El esquema anterior hay que indicarlo a mano: --schema {SCHEMA_PRODUCCION}."
         ),
     )
     parser.add_argument(
@@ -457,7 +458,10 @@ def _meta_gcp(lote: Lote) -> dict[str, str]:
     return meta
 
 
-def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str], reporte=None) -> bool:
+def verificar_paso(
+    estado: EstadoCorrida, svc, lote: Lote, destino_id: str, rehacer: set[str], reporte=None,
+    schema: str = SCHEMA_DEFECTO,
+) -> bool:
     clave = lote.clave
     if estado.completado(clave, "verificacion") and "verificacion" not in rehacer:
         return True
@@ -467,6 +471,8 @@ def verificar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, reha
             programa=estado.destino_de(clave)[1] or lote.etiqueta,
             meta=_meta_gcp(lote),
             avance=_avance_de(reporte, lote, "verificacion"),
+            # En la base limpia cada copia debe saber de qué archivo del origen salió.
+            exigir_vinculo=es_esquema_limpio(schema),
         )
     except Exception as e:
         _fallar_paso(
@@ -493,6 +499,7 @@ def cargar_paso(estado: EstadoCorrida, svc, lote: Lote, destino_id: str, destino
         filas = escanear_lote(
             svc, destino_id, lote, destino_nombre,
             avance=_avance_de(reporte, lote, "carga"),
+            con_origen=es_esquema_limpio(schema),
         )
         stats = cargar_lote(
             filas, schema=schema, simular=simular, log=logging.info,
@@ -554,7 +561,7 @@ def procesar_lote(
         return False
     if _parar():
         return False
-    verificado = verificar_paso(estado, svc, lote, destino[0], rehacer, reporte)
+    verificado = verificar_paso(estado, svc, lote, destino[0], rehacer, reporte, schema=schema)
     if not verificado and not forzar_carga:
         estado.marcar(lote.clave, "carga", "omitido", detalle="Retenido por la compuerta: la verificación encontró diferencias")
         return False

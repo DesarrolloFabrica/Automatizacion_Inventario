@@ -89,7 +89,10 @@ class CursorFalso:
         self,
         enlaces_existentes: tuple[str, ...] = (),
         archivos_previos: dict[str, int] | None = None,
+        columnas_origen: bool = True,
     ):
+        self.columnas_origen = columnas_origen
+        self.origenes_cargados: set[str] = set()
         self.sql: list[tuple[str, tuple]] = []
         self.inserciones: list[tuple[str, tuple]] = []
         self.borrados: list[tuple[str, ...]] = []
@@ -120,6 +123,15 @@ class CursorFalso:
             self.rowcount = sum(self._previos.pop(p, 0) for p in programas)
         elif mayus.startswith("INSERT INTO"):
             self.inserciones.append((texto, parametros))
+            if "RETURNING ID" in mayus:  # esquema limpio: el id lo da la secuencia
+                self._id += 1
+                self._resultado = (self._id,)
+                if ".archivo (" in texto:
+                    self.origenes_cargados.add(parametros[12])
+        elif "INFORMATION_SCHEMA.COLUMNS" in mayus:
+            self._filas = [("origen_id",), ("fecha_origen",)] if self.columnas_origen else []
+        elif ".archivo WHERE origen_id" in texto:
+            self._resultado = (7,) if parametros and parametros[0] in self.origenes_cargados else None
         elif "GROUP BY P.NOMBRE" in mayus:  # conteo previo por programa
             programas = tuple(parametros[0] or ()) if parametros else ()
             self._filas = [(p, "PRODUCTO", self._previos[p]) for p in programas if p in self._previos]
@@ -211,6 +223,10 @@ class GmailFalso:
 # Escenario
 # ---------------------------------------------------------------------------
 class BaseExtremoAExtremo(unittest.TestCase):
+    # Estos escenarios prueban la carga del esquema anterior (reemplazo por
+    # programa). La recarga limpia en fabrica1 está en TestRecargaLimpiaFabrica1.
+    ESQUEMA = "fabrica_pruebas"
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self._tmp.name)
@@ -261,7 +277,7 @@ class BaseExtremoAExtremo(unittest.TestCase):
             mock.patch("flujo_lib.prevalidacion.drive.construir_servicio", lambda _c: self.fake),
             mock.patch(
                 "flujo_lib.prevalidacion._conectar_psycopg2",
-                BaseFalsa(esquemas=("fabrica", "fabrica_pruebas")),
+                BaseFalsa(esquemas=("fabrica", "fabrica_pruebas", "fabrica1")),
             ),
             mock.patch("run_flujo.clonar_arbol", espia_clonar),
             # Carga real, con una conexión simulada en lugar de Cloud SQL.
@@ -298,6 +314,8 @@ class BaseExtremoAExtremo(unittest.TestCase):
 
     def correr(self, excel: Path, *extra: str) -> int:
         argv = ["--excel", str(excel), "--dir-corridas", str(self.dir_corridas), *extra]
+        if "--schema" not in extra:
+            argv += ["--schema", self.ESQUEMA]
         with contextlib.redirect_stdout(self.salida):
             return run_flujo.main(argv)
 
@@ -451,6 +469,97 @@ class TestCompuertaYReanudacion(BaseExtremoAExtremo):
         self.assertEqual(self.conexion.cursor_obj.archivos_insertados(), insertados_primera)
         self.assertEqual(len(self.gmail.enviados), 2)  # un correo por corrida
         self.assertEqual(len(self.estado()["corridas"]), 2)
+
+
+
+class TestRecargaLimpiaFabrica1(BaseExtremoAExtremo):
+    """
+    Recarga desde cero en fabrica1 (2026-10-02) con los casos reales que dañaron fabrica:
+    un PNG llamado sin punto ("G1003_mapapng") y un PDF llamado ".png".
+    """
+
+    ESQUEMA = "fabrica1"
+
+    def setUp(self):
+        super().setUp()
+        # Como en el Drive real: PRODUCTO / ESCUELA_… / PROGRAMA (la escuela sale de ahí).
+        producto = self.fake.agregar_carpeta("PRODUCTO")
+        for origen, escuela in ((ORIGEN_A, "ESCUELA_CIENCIAS_BASICAS"), (ORIGEN_B, "ESCUELA_INGENIERIA")):
+            carpeta = self.fake.agregar_carpeta(escuela, producto)
+            self.fake.files().update(fileId=origen, addParents=carpeta, fields="id").execute()
+        mat_a = self._carpeta(ORIGEN_A, "SEMESTRE I", "NOTEBOOK", "01. MATEMATICAS")
+        self.png_pegado = self.fake.agregar_archivo(
+            "G1003_mapapng", mat_a, contenido=b"png-real", mime="image/png",
+            creado="2026-06-11T15:04:05.000Z",
+        )
+        self.pdf_png = self.fake.agregar_archivo(
+            "G1004_lectura.png", mat_a, contenido=b"%PDF-1.7", mime="application/pdf",
+            creado="2026-06-12T08:00:00.000Z",
+        )
+        self.origen_antes[ORIGEN_A] = _rutas(self.fake, ORIGEN_A)
+
+    def _carpeta(self, raiz: str, *nombres: str) -> str:
+        actual = raiz
+        for nombre in nombres:
+            actual = next(h["id"] for h in self.fake.hijos(actual) if h["name"] == nombre)
+        return actual
+
+    def filas_archivo(self) -> list[dict]:
+        """Cada INSERT en archivo como dict (orden de columnas de _insertar_archivo_limpio)."""
+        columnas = ("granulo_id", "raiz_id", "destinatario_id", "periodo_id", "cliente_id",
+                    "extension_id", "nombre", "nombre_original", "enlace", "hash", "fecha_registro",
+                    "activo", "origen_id", "fecha_origen")
+        return [dict(zip(columnas, p)) for sql, p in self.conexion.cursor_obj.inserciones
+                if ".archivo (" in sql]
+
+    def test_carga_nombres_normalizados_con_id_y_fecha_del_origen(self):
+        codigo = self.correr(self.excel())
+        self.assertEqual(codigo, 2, self.salida.getvalue())  # B sigue retenido (PDF en PORTADA)
+        self.assertEqual(self.pasos(ORIGEN_A)["carga"], "ok", self.salida.getvalue())
+
+        filas = {f["nombre"]: f for f in self.filas_archivo()}
+        self.assertEqual(
+            sorted(filas),
+            ["01_Quiz.txt", "G1001_intro.pdf", "G1002_portada.png", "G1003_mapa.png", "G1004_lectura.pdf"],
+        )
+        mapa = filas["G1003_mapa.png"]
+        self.assertEqual(mapa["nombre_original"], "G1003_mapapng")  # tal como estaba en el origen
+        self.assertEqual(mapa["origen_id"], self.png_pegado)
+        self.assertEqual(mapa["fecha_origen"], "2026-06-11T15:04:05.000Z")
+        lectura = filas["G1004_lectura.pdf"]
+        self.assertEqual((lectura["nombre_original"], lectura["origen_id"]), ("G1004_lectura.png", self.pdf_png))
+        # Todos saben de qué archivo del origen salieron y cuándo se subió.
+        self.assertTrue(all(f["origen_id"] and f["fecha_origen"] for f in filas.values()))
+
+    def test_el_clon_queda_con_nombres_del_formato_real(self):
+        self.correr(self.excel())
+        mat = self._carpeta(self.clon(NOMBRE_A)["id"], "SEMESTRE I", "NOTEBOOK", "01. MATEMATICAS")
+        hijos = {h["name"]: h for h in self.fake.hijos(mat) if h["mimeType"] != MIME_FOLDER}
+        self.assertIn("G1003_mapa.png", hijos)
+        self.assertEqual(hijos["G1004_lectura.pdf"]["mimeType"], "application/pdf")
+        self.assertEqual(_rutas(self.fake, ORIGEN_A), self.origen_antes[ORIGEN_A])  # origen intacto
+
+    def test_no_borra_nada_y_los_ids_salen_de_las_secuencias(self):
+        self.correr(self.excel())
+        cursor = self.conexion.cursor_obj
+        self.assertEqual(cursor.borrados, [])
+        self.assertFalse(any("SELECT COALESCE(MAX(id), 0) + 1" in sql for sql, _ in cursor.sql))
+        # El INSERT de archivo no lleva id: lo pone la secuencia.
+        self.assertTrue(all(not sql.split("(", 1)[1].lstrip().startswith("id,")
+                            for sql, _ in cursor.inserciones if ".archivo (" in sql))
+
+    def test_segunda_carga_no_duplica_por_id_de_origen(self):
+        self.correr(self.excel())
+        antes = len(self.filas_archivo())
+        self.correr(self.excel(), "--rehacer", "carga")
+        self.assertEqual(len(self.filas_archivo()), antes)
+
+    def test_sin_columnas_nuevas_no_carga_y_dice_que_hacer(self):
+        self.conexion.cursor_obj.columnas_origen = False
+        self.correr(self.excel())
+        self.assertEqual(self.pasos(ORIGEN_A)["carga"], "fallido")
+        self.assertEqual(self.filas_archivo(), [])
+        self.assertIn("fabrica1_001_origen_archivo.sql", self.salida.getvalue())
 
 
 if __name__ == "__main__":

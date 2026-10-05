@@ -51,7 +51,10 @@ from lms_lib.constantes import (
 
 def normalizar_extension(tipo: object) -> str:
     """Normaliza extensión a minúsculas sin punto (mp4, pdf). No usa norm_text."""
-    return str(tipo or "").strip().lower().lstrip(".")
+    normalizada = str(tipo or "").strip().lower().lstrip(".")
+    # Compatibilidad con inventarios anteriores: la BD representa "sin extensión"
+    # con una cadena vacía; el marcador viejo no cabe en extension.tipo varchar(10).
+    return "" if normalizada == "sin_extension" else normalizada
 
 
 def norm_text(value: object) -> str:
@@ -128,7 +131,8 @@ def listar_hijos(servicio, parent_id: str) -> list[dict]:
                 pageSize=200,
                 pageToken=page_token,
                 orderBy="folder,name_natural",
-                fields="nextPageToken,files(id,name,mimeType,webViewLink,fileExtension)",
+                # properties: ID del archivo de origen que guarda cada copia del clon.
+                fields="nextPageToken,files(id,name,mimeType,webViewLink,fileExtension,properties)",
                 includeItemsFromAllDrives=True,
                 supportsAllDrives=True,
                 corpora="allDrives",

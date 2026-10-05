@@ -35,6 +35,13 @@ VARIABLES_DB = ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")
 PUERTO_DB_DEFECTO = 5432
 TIEMPO_CONEXION_DB = 30  # segundos, igual que LMS_Fabrica/cargar_base_gcp.py
 CONSULTA_ESQUEMA = "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s"
+# Columnas que la base limpia (fabrica1) necesita en archivo para guardar el origen.
+COLUMNAS_ORIGEN = ("origen_id", "fecha_origen")
+CONSULTA_COLUMNAS_ORIGEN = (
+    "SELECT column_name FROM information_schema.columns "
+    "WHERE table_schema = %s AND table_name = 'archivo' "
+    "AND column_name IN ('origen_id', 'fecha_origen')"
+)
 
 _PREFIJOS = {"ok": "OK", "aviso": "AVISO", "error": "ERROR"}
 _SEPARADOR_CORREOS = re.compile(r"[,;]")
@@ -268,6 +275,27 @@ def _revisar_cliente(res: ResultadoPrevalidacion, log, detectar=None) -> None:
     res.lotes[:] = resueltos
 
 
+def _revisar_escuela(res: ResultadoPrevalidacion, schema: str) -> None:
+    """
+    La base limpia (fabrica1) no acepta archivos sin escuela: se avisa antes de
+    clonar para no descubrirlo al final. Es aviso y no error porque en una raíz
+    LMS_CORRECCIONES la escuela sale de cada subcarpeta, no del lote.
+    """
+    from .gcp import es_esquema_limpio
+
+    if not es_esquema_limpio(schema):
+        return
+    for lote in res.lotes:
+        if not getattr(lote, "escuela_gcp", ""):
+            res.agregar(
+                "aviso",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: no se encontró la carpeta ESCUELA_… por encima del "
+                f"origen. {schema} exige escuela y la carga de ese lote fallará si no aparece.",
+                "Revisa que el origen esté dentro de PRODUCTO / ESCUELA_… / PROGRAMA en Drive.",
+            )
+
+
 def _revisar_correo(res: ResultadoPrevalidacion, env: Mapping[str, str], simular: bool, log) -> None:
     log("Revisando los correos de aviso (CORREOS_AVISO)...")
     nivel = _nivel_falla(simular)
@@ -311,6 +339,17 @@ def _esquema_existe(conn, schema: str) -> bool:
         cur.close()
 
 
+def _columnas_origen_faltantes(conn, schema: str) -> list[str]:
+    """Cuáles de origen_id / fecha_origen no existen todavía en archivo."""
+    cur = conn.cursor()
+    try:
+        cur.execute(CONSULTA_COLUMNAS_ORIGEN, (schema,))
+        presentes = {str(fila[0]) for fila in cur.fetchall() or []}
+    finally:
+        cur.close()
+    return [c for c in COLUMNAS_ORIGEN if c not in presentes]
+
+
 def _revisar_db(
     res: ResultadoPrevalidacion, env: Mapping[str, str], schema: str, simular: bool, conectar_db, log
 ) -> None:
@@ -350,6 +389,11 @@ def _revisar_db(
             connect_timeout=TIEMPO_CONEXION_DB,
         )
         existe = _esquema_existe(conn, schema)
+        from .gcp import MIGRACION_ORIGEN, es_esquema_limpio
+
+        columnas_faltantes = (
+            _columnas_origen_faltantes(conn, schema) if existe and es_esquema_limpio(schema) else []
+        )
     except ImportError as e:
         res.agregar(
             nivel,
@@ -375,6 +419,15 @@ def _revisar_db(
             "db",
             f"El esquema {schema} no existe en la base de datos.",
             "Revisa el parámetro --schema.",
+        )
+        return
+    if columnas_faltantes:
+        res.agregar(
+            nivel,
+            "db",
+            f"La tabla archivo de {schema} no tiene las columnas {', '.join(columnas_faltantes)} "
+            "(ID y fecha de subida del archivo de origen).",
+            f"Ejecuta {MIGRACION_ORIGEN} en la base y vuelve a ejecutar.",
         )
         return
     res.agregar(
@@ -432,6 +485,7 @@ def prevalidar(
     )
     _revisar_drive(res, log)
     _revisar_cliente(res, log)
+    _revisar_escuela(res, schema)
     _revisar_correo(res, env, simular, log)
     _revisar_db(res, env, schema, simular, conectar_db, log)
     return res

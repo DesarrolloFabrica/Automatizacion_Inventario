@@ -52,12 +52,15 @@ class ErrorPsycopgFalso(Exception):
 
 
 class CursorFalso:
-    def __init__(self, esquemas: tuple[str, ...], fallo: BaseException | None = None):
+    def __init__(self, esquemas: tuple[str, ...], fallo: BaseException | None = None,
+                 columnas_origen: bool = True):
         self.esquemas = esquemas
         self.fallo = fallo
+        self.columnas_origen = columnas_origen
         self.consultas: list[tuple[str, object]] = []
         self.cerrado = False
         self._fila = None
+        self._filas: list = []
 
     def execute(self, sql: str, params=None) -> None:
         if self.fallo is not None:
@@ -67,25 +70,32 @@ class CursorFalso:
             self._fila = (1,)
         elif "information_schema.schemata" in sql:
             self._fila = (1,) if params and params[0] in self.esquemas else None
+        elif "information_schema.columns" in sql:
+            self._filas = [("origen_id",), ("fecha_origen",)] if self.columnas_origen else []
         else:
             raise AssertionError(f"consulta inesperada: {sql!r}")
 
     def fetchone(self):
         return self._fila
 
+    def fetchall(self):
+        return list(self._filas)
+
     def close(self) -> None:
         self.cerrado = True
 
 
 class ConexionFalsa:
-    def __init__(self, esquemas: tuple[str, ...], fallo_consulta: BaseException | None = None):
+    def __init__(self, esquemas: tuple[str, ...], fallo_consulta: BaseException | None = None,
+                 columnas_origen: bool = True):
         self.esquemas = esquemas
+        self.columnas_origen = columnas_origen
         self.fallo_consulta = fallo_consulta
         self.cursores: list[CursorFalso] = []
         self.cerradas = 0
 
     def cursor(self) -> CursorFalso:
-        cur = CursorFalso(self.esquemas, self.fallo_consulta)
+        cur = CursorFalso(self.esquemas, self.fallo_consulta, self.columnas_origen)
         self.cursores.append(cur)
         return cur
 
@@ -101,7 +111,9 @@ class BaseFalsa:
         esquemas: tuple[str, ...] = ("fabrica",),
         fallo_conexion: BaseException | None = None,
         fallo_consulta: BaseException | None = None,
+        columnas_origen: bool = True,
     ):
+        self.columnas_origen = columnas_origen
         self.esquemas = esquemas
         self.fallo_conexion = fallo_conexion
         self.fallo_consulta = fallo_consulta
@@ -112,7 +124,7 @@ class BaseFalsa:
         self.llamadas.append(parametros)
         if self.fallo_conexion is not None:
             raise self.fallo_conexion
-        conn = ConexionFalsa(self.esquemas, self.fallo_consulta)
+        conn = ConexionFalsa(self.esquemas, self.fallo_consulta, self.columnas_origen)
         self.conexiones.append(conn)
         return conn
 
@@ -489,6 +501,31 @@ class TestBaseDatos(BasePrevalidacion):
         conn = self.db.conexiones[0]
         self.assertEqual(conn.cerradas, 1)
         self.assertEqual(conn.cursores[0].consultas[1], (CONSULTA_ESQUEMA, ("fabrica_pruebas",)))
+
+    def test_fabrica1_sin_columnas_de_origen_no_arranca(self):
+        # Mejor saberlo antes de clonar que después de horas copiando.
+        db = BaseFalsa(esquemas=("fabrica1",), columnas_origen=False)
+        res = self.prevalidar(schema="fabrica1", conectar_db=db)
+        self.assertFalse(res.ok)
+        err = self.unico(res, "db", "error")
+        self.assertIn("origen_id, fecha_origen", err.mensaje)
+        self.assertIn("fabrica1_001_origen_archivo.sql", err.accion)
+
+    def test_fabrica1_con_columnas_de_origen_esta_ok(self):
+        res = self.prevalidar(schema="fabrica1", conectar_db=BaseFalsa(esquemas=("fabrica1",)))
+        self.assertEqual(self.por_area(res, "db", "error"), [])
+        self.assertEqual(len(self.por_area(res, "db", "ok")), 1)
+
+    def test_esquema_anterior_no_pide_columnas_de_origen(self):
+        db = BaseFalsa(esquemas=("fabrica",), columnas_origen=False)
+        res = self.prevalidar(conectar_db=db)
+        self.assertEqual(self.por_area(res, "db", "error"), [])
+
+    def test_fabrica1_avisa_si_el_lote_no_tiene_escuela(self):
+        res = self.prevalidar(schema="fabrica1", conectar_db=BaseFalsa(esquemas=("fabrica1",)))
+        avisos = [h.mensaje for h in self.por_area(res, "cliente", "aviso") if "ESCUELA_" in h.mensaje]
+        self.assertTrue(avisos)
+        self.assertTrue(res.ok)  # es aviso: en LMS_CORRECCIONES la escuela sale de cada subcarpeta
 
     def test_esquema_ausente_con_simular_es_aviso(self):
         res = self.prevalidar(schema="fabrica_pruebas", simular=True)

@@ -37,7 +37,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
 ]
 MIME_FOLDER = "application/vnd.google-apps.folder"
-CAMPOS_HIJO = "id, name, mimeType, size, md5Checksum, fileExtension, webViewLink"
+# properties: ID del origen guardado en cada copia; createdTime: fecha de subida a Drive.
+CAMPOS_HIJO = "id, name, mimeType, size, md5Checksum, fileExtension, webViewLink, properties, createdTime"
 
 _ACCION_RENOVAR = "Ejecuta python renovar_token.py y vuelve a ejecutar."
 _ID_DRIVE_RE = re.compile(r"[A-Za-z0-9_-]+")

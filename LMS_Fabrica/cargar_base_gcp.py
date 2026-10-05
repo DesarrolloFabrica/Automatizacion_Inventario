@@ -31,6 +31,12 @@ from generar_base_lms import (
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = BASE_DIR / "lms_base_final.csv"
 MAX_VARCHAR = 200
+# Esquema limpio (fabrica1): los IDs salen de las secuencias de cada tabla
+# (1, 2, 3… sin huecos raros), no se usan los IDs fijos de EXTENSION_MAP (son
+# los de fabrica) y el programa se identifica por escuela + nombre, como dice
+# su restricción UNIQUE. En fabrica/fabrica_pruebas se deja en False: allí las
+# secuencias están atrasadas respecto a MAX(id) y usarlas chocaría.
+USAR_SECUENCIAS = False
 
 
 def trunc(value: str, limit: int = MAX_VARCHAR) -> str:
@@ -53,7 +59,8 @@ def resolver_extension_id(cur, tipo: str, cache: dict) -> int:
     cache_key = ("extension", "tipo", tipo_norm)
     if cache_key in cache:
         return cache[cache_key]
-    if tipo_norm in EXTENSION_MAP:
+    # Los IDs fijos son los de fabrica; en un esquema limpio no existen.
+    if tipo_norm in EXTENSION_MAP and not USAR_SECUENCIAS:
         cache[cache_key] = EXTENSION_MAP[tipo_norm]
         return cache[cache_key]
     cur.execute(
@@ -81,6 +88,27 @@ def get_or_create(
     """
     cache_key = (table, key_col, key_val, tuple(sorted((extra or {}).items())))
     if cache_key in cache:
+        return cache[cache_key]
+
+    if USAR_SECUENCIAS:
+        # La identidad incluye las columnas extra (programa = escuela + nombre).
+        filtros = [key_col, *(extra or {})]
+        cur.execute(
+            f"SELECT id FROM {SCHEMA}.{table} WHERE "
+            + " AND ".join(f"{col} = %s" for col in filtros),
+            (key_val, *(extra or {}).values()),
+        )
+        row = cur.fetchone()
+        if row:
+            cache[cache_key] = int(row[0])
+            return cache[cache_key]
+        cols = [key_col, *(extra or {})]
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.{table} ({', '.join(cols)}) "
+            f"VALUES ({', '.join(['%s'] * len(cols))}) RETURNING id",
+            (key_val, *(extra or {}).values()),
+        )
+        cache[cache_key] = int(cur.fetchone()[0])
         return cache[cache_key]
 
     cur.execute(
@@ -133,6 +161,17 @@ def get_or_create_materia(
         cache[cache_key] = int(row[0])
         return cache[cache_key]
 
+    if USAR_SECUENCIAS:
+        cur.execute(
+            f"""
+            INSERT INTO {SCHEMA}.materia (programa_id, paquete_id, semestre, nombre)
+            VALUES (%s, %s, %s, %s) RETURNING id
+            """,
+            (programa_id, paquete_id, semestre, nombre),
+        )
+        cache[cache_key] = int(cur.fetchone()[0])
+        return cache[cache_key]
+
     new_id = next_id(cur, "materia")
     cur.execute(
         f"""
@@ -164,6 +203,17 @@ def get_or_create_granulo(
     row = cur.fetchone()
     if row:
         cache[cache_key] = int(row[0])
+        return cache[cache_key]
+
+    if USAR_SECUENCIAS:
+        cur.execute(
+            f"""
+            INSERT INTO {SCHEMA}.granulo (materia_id, codigo, nombre)
+            VALUES (%s, %s, %s) RETURNING id
+            """,
+            (materia_id, codigo, nombre or codigo),
+        )
+        cache[cache_key] = int(cur.fetchone()[0])
         return cache[cache_key]
 
     new_id = next_id(cur, "granulo")
@@ -232,16 +282,17 @@ def cargar_csv(
     global SCHEMA
     SCHEMA = schema
 
-    env_path = ENV_PATH if ENV_PATH.exists() else BASE_DIR / ".env"
+    env_path = ENV_PATH if ENV_PATH.exists() else BASE_DIR.parent / ".env"
     if not env_path.exists():
-        raise FileNotFoundError(f"No se encontró {ENV_PATH} ni {BASE_DIR / '.env'}")
+        raise FileNotFoundError(f"No se encontró {ENV_PATH} ni {BASE_DIR.parent / '.env'}")
 
     load_dotenv(env_path)
     password = os.getenv("DB_PASSWORD", "")
     if not password:
         raise ValueError("DB_PASSWORD no configurada en .env")
 
-    with csv_path.open(encoding="utf-8", newline="") as handle:
+    # utf-8-sig acepta tanto CSV normales como exportaciones con BOM (Excel/PowerShell).
+    with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         filas = list(csv.DictReader(handle))
 
     stats = {

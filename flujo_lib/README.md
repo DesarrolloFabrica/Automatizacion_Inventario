@@ -142,5 +142,9 @@ Archivos: `test_mensajes.py`, `test_drive.py`, `test_nombres.py`,
 - Conversión JPG → PNG en el clon (todos los archivos, conservando el nombre base).
 - Verificación origen vs clon por nombre canónico y resultado `con_diferencias`.
 - Compuerta: solo los lotes verificados pasan a la carga (o `--forzar-carga`).
-- Carga al esquema `fabrica_pruebas` (producción solo con `--schema fabrica`) reutilizando el token único.
+- Carga al esquema `fabrica1` por defecto (recarga limpia: formato real, nombre normalizado,
+  `origen_id`/`fecha_origen`, IDs de secuencia, sin borrar); `fabrica_pruebas` y `fabrica`
+  solo con `--schema`, con la regla anterior de reemplazo por programa.
+- `normalizacion.py`: nombre y extensión finales de un archivo (una sola regla para
+  clonar, convertir, verificar y cargar) y el ID de origen que guarda cada copia.
 - Un único correo final con el Excel de estado adjunto y correo de fallo en lenguaje llano.

@@ -402,6 +402,8 @@ def escanear_carpeta_programa(
                     "archivo_nombre_original": nombre,
                     "archivo_enlace": hijo.get("webViewLink", ""),
                     "extension": ext,
+                    # ID del archivo de origen (lo guarda la clonación en la copia).
+                    "origen_id": str((hijo.get("properties") or {}).get("origen_id") or ""),
                 }
             )
 

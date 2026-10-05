@@ -239,13 +239,20 @@ class FakeDrive:
         contenido: bytes = b"x",
         mime: str | None = None,
         id: str | None = None,
+        creado: str | None = None,
     ) -> str:
-        """Sin `mime`, el tipo sale de la extensión como hace Drive al subir (sin extensión: PDF)."""
+        """
+        Sin `mime`, el tipo sale de la extensión como hace Drive al subir (sin extensión: PDF).
+        `creado` fija createdTime (fecha en que el archivo se subió a Drive).
+        """
         self._exigir_padres([parent_id], como_404=False)
         if mime is None:
             ext = nombre.rsplit(".", 1)[1].lower() if "." in nombre.strip(".") else ""
             mime = _MIME_POR_EXTENSION.get(ext, "application/pdf")
-        return self._nuevo_archivo(nombre, [parent_id], contenido, mime, id)["id"]
+        reg = self._nuevo_archivo(nombre, [parent_id], contenido, mime, id)
+        if creado:
+            reg["createdTime"] = creado
+        return reg["id"]
 
     def obtener(self, id: str) -> dict:
         """Copia del registro interno (trashed explícito, sin proyección de campos)."""
@@ -324,7 +331,8 @@ class FakeDrive:
         return reg
 
     def _nuevo_archivo(
-        self, nombre: str, parents: list[str], contenido: bytes, mime: str, id: str | None = None
+        self, nombre: str, parents: list[str], contenido: bytes, mime: str, id: str | None = None,
+        properties: dict | None = None,
     ) -> dict:
         contenido = bytes(contenido or b"")
         extension = nombre.rsplit(".", 1)[1] if "." in nombre.strip(".") else None
@@ -339,6 +347,9 @@ class FakeDrive:
             "md5Checksum": hashlib.md5(contenido).hexdigest(),
             "fileExtension": extension,
             "webViewLink": None,
+            "properties": dict(properties) if properties else None,
+            "createdTime": f"2026-01-01T00:00:{self._secuencia % 60:02d}.000Z",
+            "modifiedTime": "2026-01-02T00:00:00.000Z",
         }
         self._registrar(reg, id, "arch")
         reg["webViewLink"] = f"https://drive.google.com/file/d/{reg['id']}/view"
@@ -433,7 +444,10 @@ class FakeDrive:
         if mime == MIME_FOLDER:
             reg = self._nueva_carpeta(nombre, parents)
         else:
-            reg = self._nuevo_archivo(nombre, parents, contenido, mime or "application/octet-stream")
+            reg = self._nuevo_archivo(
+                nombre, parents, contenido, mime or "application/octet-stream",
+                properties=body.get("properties"),
+            )
         return self._proyectar(reg, _campos_simples(fields))
 
     def _api_copy(self, file_id: str, body, fields) -> dict:
@@ -448,6 +462,7 @@ class FakeDrive:
             parents,
             self._contenidos.get(file_id, b""),
             original["mimeType"],
+            properties={**(original.get("properties") or {}), **(body.get("properties") or {})},
         )
         return self._proyectar(reg, _campos_simples(fields))
 
@@ -458,6 +473,11 @@ class FakeDrive:
             reg["trashed"] = bool(body["trashed"])
         if body.get("name"):
             reg["name"] = body["name"]
+            if reg["mimeType"] != MIME_FOLDER:
+                # Igual que Drive: fileExtension sale del nombre.
+                reg["fileExtension"] = reg["name"].rsplit(".", 1)[1] if "." in reg["name"].strip(".") else None
+        if body.get("properties"):
+            reg["properties"] = {**(reg.get("properties") or {}), **body["properties"]}
         if add_parents:
             nuevos = [p for p in str(add_parents).split(",") if p]
             self._exigir_padres(nuevos)

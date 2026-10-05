@@ -79,14 +79,14 @@ def heredado(fallar=False):
 class TestGcp(unittest.TestCase):
     def test_simular_no_conecta(self):
         conectar = mock.Mock(side_effect=AssertionError("no debe conectar"))
-        stats = gcp.cargar_lote([FILA], simular=True, conectar=conectar)
+        stats = gcp.cargar_lote([FILA], schema="fabrica_pruebas", simular=True, conectar=conectar)
         self.assertEqual(stats["simulados"], 1)
         conectar.assert_not_called()
 
     def test_un_lote_una_transaccion_y_cierre(self):
         conexion = Conexion()
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
-            stats = gcp.cargar_lote([FILA], conectar=lambda: conexion)
+            stats = gcp.cargar_lote([FILA], schema="fabrica_pruebas", conectar=lambda: conexion)
         self.assertEqual(stats["insertados"], 1)
         self.assertTrue(conexion.confirmada)
         self.assertTrue(conexion.cerrada)
@@ -96,7 +96,7 @@ class TestGcp(unittest.TestCase):
         conexion = Conexion()
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(fallar=True), None)):
             with self.assertRaises(RuntimeError):
-                gcp.cargar_lote([FILA], conectar=lambda: conexion)
+                gcp.cargar_lote([FILA], schema="fabrica_pruebas", conectar=lambda: conexion)
         self.assertTrue(conexion.revertida)
         self.assertTrue(conexion.cerrada)
 
@@ -114,7 +114,7 @@ class TestReemplazo(unittest.TestCase):
     def cargar(self, filas, previos=None, **kw):
         conexion = Conexion(previos)
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
-            stats = gcp.cargar_lote(filas, conectar=lambda: conexion, **kw)
+            stats = gcp.cargar_lote(filas, schema="fabrica_pruebas", conectar=lambda: conexion, **kw)
         return stats, conexion
 
     def test_escenario_120_archivos_que_pasan_a_150(self):
@@ -162,14 +162,14 @@ class TestReemplazo(unittest.TestCase):
         conexion = Conexion({"PROGRAMA": 120})
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(fallar=True), None)):
             with self.assertRaises(RuntimeError):
-                gcp.cargar_lote([FILA], conectar=lambda: conexion)
+                gcp.cargar_lote([FILA], schema="fabrica_pruebas", conectar=lambda: conexion)
         self.assertTrue(conexion.revertida)
         self.assertFalse(conexion.confirmada)
         self.assertTrue(conexion.cerrada)
 
     def test_simular_no_borra_ni_conecta(self):
         conectar = mock.Mock(side_effect=AssertionError("no debe conectar"))
-        stats = gcp.cargar_lote([FILA], simular=True, conectar=conectar)
+        stats = gcp.cargar_lote([FILA], schema="fabrica_pruebas", simular=True, conectar=conectar)
         self.assertEqual(stats["eliminados"], 0)
         conectar.assert_not_called()
 
