@@ -484,7 +484,7 @@ class TestRecargaLimpiaFabrica1(BaseExtremoAExtremo):
         super().setUp()
         # Como en el Drive real: PRODUCTO / ESCUELA_… / PROGRAMA (la escuela sale de ahí).
         producto = self.fake.agregar_carpeta("PRODUCTO")
-        for origen, escuela in ((ORIGEN_A, "ESCUELA_CIENCIAS_BASICAS"), (ORIGEN_B, "ESCUELA_INGENIERIA")):
+        for origen, escuela in ((ORIGEN_A, "ESCUELA_SALUD_Y_BIENESTAR"), (ORIGEN_B, "ESCUELA_DE_INGENIERIA")):
             carpeta = self.fake.agregar_carpeta(escuela, producto)
             self.fake.files().update(fileId=origen, addParents=carpeta, fields="id").execute()
         mat_a = self._carpeta(ORIGEN_A, "SEMESTRE I", "NOTEBOOK", "01. MATEMATICAS")
@@ -547,6 +547,13 @@ class TestRecargaLimpiaFabrica1(BaseExtremoAExtremo):
         # El INSERT de archivo no lleva id: lo pone la secuencia.
         self.assertTrue(all(not sql.split("(", 1)[1].lstrip().startswith("id,")
                             for sql, _ in cursor.inserciones if ".archivo (" in sql))
+
+    def test_la_escuela_queda_con_su_nombre_oficial(self):
+        # En Drive se llama ESCUELA_SALUD_Y_BIENESTAR; en fabrica1, ESCUELA_DE_SALUD_Y_BIENESTAR.
+        self.correr(self.excel())
+        escuelas = [p[0] for sql, p in self.conexion.cursor_obj.inserciones
+                    if sql.startswith("INSERT INTO fabrica1.escuela ")]
+        self.assertEqual(escuelas, ["ESCUELA_DE_SALUD_Y_BIENESTAR"])
 
     def test_segunda_carga_no_duplica_por_id_de_origen(self):
         self.correr(self.excel())

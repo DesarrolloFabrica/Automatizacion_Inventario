@@ -48,17 +48,43 @@ LIMITE_EXTENSION = 10  # extension.tipo sigue siendo varchar(10)
 # Tablas de fabrica1 con secuencia propia (recurso_moodle la usa el trigger).
 TABLAS_CON_SECUENCIA = ("archivo", "cliente", "destinatario", "escuela", "extension", "granulo",
                         "materia", "paquete", "periodo", "programa", "raiz", "recurso_moodle")
-# Una misma escuela con dos nombres en el Drive origen: la carga limpia usa
-# siempre el oficial (decidido por Camilo el 2026-10-05). PRODUCTO la llama
-# ESCUELA_TRANSFORMACION_EMPRESARIAL; TANIA y REGISTRO_CALIFICADO, con "DE_".
-ESCUELAS_EQUIVALENTES = {
-    "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL": "ESCUELA_TRANSFORMACION_EMPRESARIAL",
+# Las únicas escuelas de la base limpia, todas con el mismo patrón ESCUELA_DE_…
+# (definidas por Camilo el 2026-10-05). En Drive la misma escuela aparece con y
+# sin "DE_" (ESCUELA_SALUD_Y_BIENESTAR, …_JURIDICAS_Y_DE_GOBIERNO, DISEÑO con Ñ):
+# todas esas variantes van a su nombre oficial. Una escuela que no sea ninguna
+# de estas no se carga: hay que agregarla aquí a propósito.
+ESCUELAS_OFICIALES = (
+    "ESCUELA_DE_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO",
+    "ESCUELA_DE_DISENO_Y_COMUNICACION",
+    "ESCUELA_DE_INGENIERIA",
+    "ESCUELA_DE_SALUD_Y_BIENESTAR",
+    "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL",
+)
+
+
+# Carpetas del Drive origen que NO se cargan en la base limpia (el origen no se
+# toca: se bloquean aquí). ID de la carpeta -> por qué.
+ORIGENES_EXCLUIDOS = {
+    "1plXOgDKXBTxIKn5EV11c-av0OT7qKmGt": (
+        "PRODUCTO / ESCUELA_TRANSFORMACION_EMPRESARIAL / ESPECIALIZACION_EN_GERENCIA_PUBLICA está "
+        "repetida; la válida es PRODUCTO / ESCUELA_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO / "
+        "ESPECIALIZACION_GERENCIA_PUBLICA (1TenYdfOM8WQzYOgPTd-SY0osvJvTYefn), validado por Camilo el 2026-10-05."
+    ),
 }
 
 
+def _clave_escuela(nombre: str) -> str:
+    """Nombre sin "ESCUELA_" ni los "DE_": ESCUELA_SALUD_Y_BIENESTAR -> SALUD_Y_BIENESTAR."""
+    clave = re.sub(r"^ESCUELA_", "", (nombre or "").strip().upper())
+    return re.sub(r"(^|_)DE_", r"\1", clave)
+
+
+_ESCUELA_POR_CLAVE = {_clave_escuela(e): e for e in ESCUELAS_OFICIALES}
+
+
 def escuela_oficial(nombre: str) -> str:
-    """Nombre oficial de la escuela (ya normalizado con norm_text)."""
-    return ESCUELAS_EQUIVALENTES.get(nombre, nombre)
+    """Nombre oficial de la escuela (ya normalizado con norm_text); si no es una de las oficiales, igual."""
+    return _ESCUELA_POR_CLAVE.get(_clave_escuela(nombre), nombre)
 
 
 def es_esquema_limpio(schema: str) -> bool:
@@ -172,6 +198,12 @@ def problemas_filas_limpias(filas: list[dict]) -> list[str]:
                            ("materia_nombre", "materia"), ("granulo_codigo", "código de gránulo")):
             if not str(fila.get(campo) or "").strip():
                 problemas.append(f"{etiqueta}: falta {que}.")
+        escuela = str(fila.get("escuela_nombre") or "").strip()
+        if escuela and escuela_oficial(escuela) not in ESCUELAS_OFICIALES:
+            problemas.append(
+                f"{etiqueta}: la escuela «{escuela}» no es una de las oficiales "
+                f"({', '.join(ESCUELAS_OFICIALES)})."
+            )
         if len(str(fila.get("granulo_codigo") or "")) > LIMITE_CODIGO_GRANULO:
             problemas.append(
                 f"{etiqueta}: el código de gránulo «{fila['granulo_codigo']}» pasa de "

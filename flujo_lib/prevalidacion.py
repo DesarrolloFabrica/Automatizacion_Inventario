@@ -281,12 +281,29 @@ def _revisar_escuela(res: ResultadoPrevalidacion, schema: str) -> None:
     clonar para no descubrirlo al final. Es aviso y no error porque en una raíz
     LMS_CORRECCIONES la escuela sale de cada subcarpeta, no del lote.
     """
-    from .gcp import es_esquema_limpio
+    from .gcp import ESCUELAS_OFICIALES, ORIGENES_EXCLUIDOS, es_esquema_limpio, escuela_oficial
 
     if not es_esquema_limpio(schema):
         return
     for lote in res.lotes:
-        if not getattr(lote, "escuela_gcp", ""):
+        if lote.origen_id in ORIGENES_EXCLUIDOS:
+            res.agregar(
+                "error",
+                "drive",
+                f"Lote «{lote.etiqueta}»: esa carpeta origen no se carga en {schema}. "
+                f"{ORIGENES_EXCLUIDOS[lote.origen_id]}",
+                "Quita ese lote del Excel o usa la carpeta válida.",
+            )
+        escuela = getattr(lote, "escuela_gcp", "")
+        if escuela and escuela_oficial(escuela) not in ESCUELAS_OFICIALES:
+            res.agregar(
+                "error",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: la escuela «{escuela}» no es una de las oficiales de {schema}.",
+                "Revisa la carpeta de la escuela en Drive o agrega la escuela a "
+                "ESCUELAS_OFICIALES en flujo_lib/gcp.py.",
+            )
+        elif not escuela:
             res.agregar(
                 "aviso",
                 "cliente",

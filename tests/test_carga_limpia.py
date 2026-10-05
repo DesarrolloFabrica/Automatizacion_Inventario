@@ -17,7 +17,7 @@ from tests.fake_drive import FakeDrive
 
 FILA = {
     "raiz_nombre": "LMS_Carga", "destinatario_codigo": "MEN", "periodo_codigo": "Q2",
-    "cliente_nombre": "PRODUCTO", "escuela_nombre": "ESCUELA_CIENCIAS_BASICAS",
+    "cliente_nombre": "PRODUCTO", "escuela_nombre": "ESCUELA_DE_INGENIERIA",
     "programa_nombre": "MATEMATICAS", "materia_semestre": "1", "paquete_nombre": "NOTEBOOK",
     "materia_nombre": "CALCULO", "granulo_codigo": "G1", "granulo_nombre": "G1",
     "archivo_nombre": "G1_soyunaimagen.png", "archivo_nombre_original": "G1_soyunaimagenpng",
@@ -189,7 +189,7 @@ class TestProblemasFilas(unittest.TestCase):
 
 
 class TestEscuelaOficial(unittest.TestCase):
-    """La escuela de Transformación tiene dos nombres en Drive; en fabrica1 queda una sola."""
+    """En fabrica1 solo hay 5 escuelas, todas ESCUELA_DE_…; las variantes de Drive van a esas."""
 
     def escanear(self, escuela: str, con_origen: bool) -> list[dict]:
         import types
@@ -202,17 +202,38 @@ class TestEscuelaOficial(unittest.TestCase):
         with mock.patch.object(gcp, "_heredados", return_value=(None, rutas)):
             return gcp.escanear_lote(fake, "DEST", lote, "PROGRAMA", con_origen=con_origen)
 
-    def test_con_de_pasa_al_nombre_oficial(self):
-        filas = self.escanear("ESCUELA_DE_TRANSFORMACION_EMPRESARIAL", con_origen=True)
-        self.assertEqual(filas[0]["escuela_nombre"], "ESCUELA_TRANSFORMACION_EMPRESARIAL")
+    # Nombres reales del Drive origen y de la fabrica anterior (ya pasados por norm_text).
+    VARIANTES = {
+        "ESCUELA_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO": "ESCUELA_DE_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO",
+        "ESCUELA_DE_CIENCIAS_SOCIALES_JURIDICAS_Y_DE_GOBIERNO": "ESCUELA_DE_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO",
+        "ESCUELA_DE_DISENO_Y_COMUNICACION": "ESCUELA_DE_DISENO_Y_COMUNICACION",
+        "DISENO_Y_COMUNICACION": "ESCUELA_DE_DISENO_Y_COMUNICACION",
+        "ESCUELA_DE_INGENIERIA": "ESCUELA_DE_INGENIERIA",
+        "ESCUELA_SALUD_Y_BIENESTAR": "ESCUELA_DE_SALUD_Y_BIENESTAR",
+        "ESCUELA_TRANSFORMACION_EMPRESARIAL": "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL",
+        "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL": "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL",
+    }
 
-    def test_las_demas_escuelas_no_cambian(self):
-        filas = self.escanear("ESCUELA_DE_INGENIERIA", con_origen=True)
-        self.assertEqual(filas[0]["escuela_nombre"], "ESCUELA_DE_INGENIERIA")
+    def test_cada_variante_va_a_su_nombre_oficial(self):
+        for variante, oficial in self.VARIANTES.items():
+            with self.subTest(variante=variante):
+                self.assertEqual(gcp.escuela_oficial(variante), oficial)
+
+    def test_quedan_exactamente_cinco(self):
+        self.assertEqual(len({gcp.escuela_oficial(v) for v in self.VARIANTES}), 5)
+        self.assertEqual(set(gcp.ESCUELAS_OFICIALES), set(self.VARIANTES.values()))
+
+    def test_el_escaneo_limpio_usa_el_nombre_oficial(self):
+        filas = self.escanear("ESCUELA_SALUD_Y_BIENESTAR", con_origen=True)
+        self.assertEqual(filas[0]["escuela_nombre"], "ESCUELA_DE_SALUD_Y_BIENESTAR")
 
     def test_el_esquema_anterior_no_se_toca(self):
-        filas = self.escanear("ESCUELA_DE_TRANSFORMACION_EMPRESARIAL", con_origen=False)
-        self.assertEqual(filas[0]["escuela_nombre"], "ESCUELA_DE_TRANSFORMACION_EMPRESARIAL")
+        filas = self.escanear("ESCUELA_SALUD_Y_BIENESTAR", con_origen=False)
+        self.assertEqual(filas[0]["escuela_nombre"], "ESCUELA_SALUD_Y_BIENESTAR")
+
+    def test_escuela_desconocida_no_se_carga(self):
+        problemas = gcp.problemas_filas_limpias([{**FILA, "escuela_nombre": "ESCUELA_DE_ARTES"}])
+        self.assertTrue(any("no es una de las oficiales" in p for p in problemas), problemas)
 
 
 class TestInventarioOrigen(unittest.TestCase):
@@ -273,6 +294,22 @@ class TestVerificacionVinculo(unittest.TestCase):
         resultado = self.verificar()
         self.assertTrue(any("Nombre sin normalizar" in h and "G1_x.pdf" in h for h in resultado.hallazgos),
                         resultado.hallazgos)
+
+    def test_dos_archivos_iguales_con_el_mismo_nombre_en_el_origen(self):
+        # Caso real (DIPLOMADO_EN_CONSTRUCCION_DE_PAZ, 2026-10-05): el mismo banner subido dos veces.
+        a = self.fake.agregar_archivo("P_MODULO_3.png", self.origen, contenido=b"banner", mime="image/png")
+        b = self.fake.agregar_archivo("P_MODULO_3.png", self.origen, contenido=b"banner", mime="image/png")
+        self.copiar(a, "P_MODULO_3.png")
+        self.copiar(b, "P_MODULO_3.png")
+        resultado = self.verificar(exigir_vinculo=True)
+        self.assertEqual(resultado.estado, "ok", resultado.hallazgos)
+
+    def test_falta_una_de_dos_copias_iguales(self):
+        a = self.fake.agregar_archivo("P_MODULO_3.png", self.origen, contenido=b"banner", mime="image/png")
+        self.fake.agregar_archivo("P_MODULO_3.png", self.origen, contenido=b"banner", mime="image/png")
+        self.copiar(a, "P_MODULO_3.png")
+        resultado = self.verificar(exigir_vinculo=True)
+        self.assertTrue(any("Falta en el clon: P_MODULO_3.png (1)" in h for h in resultado.hallazgos), resultado.hallazgos)
 
     def test_dos_archivos_que_quedan_con_el_mismo_nombre(self):
         self.fake.agregar_archivo("G1_x.png", self.origen, mime="image/png")

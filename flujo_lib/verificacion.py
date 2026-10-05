@@ -23,8 +23,10 @@ from .normalizacion import extension_real, nombre_final_de, origen_de
 # Si algún día aparece un tipo nuevo, es preferible dejarlo sin regla a ponerle
 # una estrecha: una regla equivocada genera cientos de avisos falsos que tapan
 # los problemas de verdad.
+# "" = documento nativo de Google (sin extensión): en ACTIVIDADES MOODLE se
+# aceptan tal cual (ACA, FORO, TEMAS Y PRESENTACION…), decidido por Camilo el 2026-10-05.
 EXTENSIONES_POR_TIPO = {
-    "ACTIVIDADES MOODLE": {"txt", "docx"}, "SCORM": {"zip"}, "PDF": {"pdf"},
+    "ACTIVIDADES MOODLE": {"txt", "docx", ""}, "SCORM": {"zip"}, "PDF": {"pdf"},
     "FICHAS": {"pdf"}, "REVISTA": {"pdf"}, "GLOSARIO": {"pdf"},
     "PORTADA MATERIA": {"png"}, "PODCAST": {"mp3"},
 }
@@ -64,7 +66,14 @@ def _inventariar(svc, raiz_id: str) -> tuple[dict[str, dict], dict[str, str]]:
                 carpetas[rel] = item["name"]
                 rec(item["id"], rel)
             else:
-                archivos[rel] = item
+                # Dos archivos con el mismo nombre en la misma carpeta (pasa en el
+                # origen): ninguno puede pisar al otro, o la comparación y el
+                # vínculo con el origen pierden uno. El segundo va como "nombre (2)".
+                clave, n = rel, 1
+                while clave in archivos:
+                    n += 1
+                    clave = f"{rel} ({n})"
+                archivos[clave] = item
     rec(raiz_id, "")
     return archivos, carpetas
 

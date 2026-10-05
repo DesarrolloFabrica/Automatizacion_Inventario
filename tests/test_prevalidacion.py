@@ -527,6 +527,37 @@ class TestBaseDatos(BasePrevalidacion):
         self.assertTrue(avisos)
         self.assertTrue(res.ok)  # es aviso: en LMS_CORRECCIONES la escuela sale de cada subcarpeta
 
+    def test_fabrica1_rechaza_una_escuela_que_no_es_oficial(self):
+        from dataclasses import replace
+        from flujo_lib.prevalidacion import ResultadoPrevalidacion, _revisar_escuela
+        lote = replace(self.prevalidar().lotes[0], escuela_gcp="ESCUELA_DE_ARTES")
+        res = ResultadoPrevalidacion()
+        res.lotes.append(lote)
+        _revisar_escuela(res, "fabrica1")
+        self.assertIn("no es una de las oficiales", self.unico(res, "cliente", "error").mensaje)
+        res_ok = ResultadoPrevalidacion()
+        res_ok.lotes.append(replace(lote, escuela_gcp="ESCUELA_SALUD_Y_BIENESTAR"))  # variante válida
+        _revisar_escuela(res_ok, "fabrica1")
+        self.assertEqual(res_ok.hallazgos, [])
+
+    def test_fabrica1_no_carga_la_gerencia_publica_repetida(self):
+        from dataclasses import replace
+        from flujo_lib.prevalidacion import ResultadoPrevalidacion, _revisar_escuela
+        base = replace(self.prevalidar().lotes[0], escuela_gcp="ESCUELA_TRANSFORMACION_EMPRESARIAL")
+        res = ResultadoPrevalidacion()
+        res.lotes.append(replace(base, origen_id="1plXOgDKXBTxIKn5EV11c-av0OT7qKmGt"))
+        _revisar_escuela(res, "fabrica1")
+        err = self.unico(res, "drive", "error")
+        self.assertIn("1TenYdfOM8WQzYOgPTd-SY0osvJvTYefn", err.mensaje)  # dice cuál es la válida
+        valida = ResultadoPrevalidacion()
+        valida.lotes.append(replace(base, origen_id="1TenYdfOM8WQzYOgPTd-SY0osvJvTYefn"))
+        _revisar_escuela(valida, "fabrica1")
+        self.assertEqual(valida.hallazgos, [])
+        anterior = ResultadoPrevalidacion()  # fabrica sigue como antes
+        anterior.lotes.append(replace(base, origen_id="1plXOgDKXBTxIKn5EV11c-av0OT7qKmGt"))
+        _revisar_escuela(anterior, "fabrica")
+        self.assertEqual(anterior.hallazgos, [])
+
     def test_esquema_ausente_con_simular_es_aviso(self):
         res = self.prevalidar(schema="fabrica_pruebas", simular=True)
         self.assertTrue(res.ok)

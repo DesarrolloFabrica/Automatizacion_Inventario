@@ -177,8 +177,13 @@ class VerificacionPorFormatoRealTest(unittest.TestCase):
     def test_png_real_en_portada_es_ok(self):
         self.assertEqual(self.verificar("PORTADA MATERIA", "PORTADA.png", "image/png").estado, "ok")
 
-    def test_google_doc_llamado_docx_en_moodle_se_avisa(self):
-        resultado = self.verificar("ACTIVIDADES MOODLE", "ACA.docx", "application/vnd.google-apps.document")
+    def test_google_doc_en_moodle_se_acepta(self):
+        # Decidido por Camilo el 2026-10-05: ACA, FORO… como documento de Google se cargan tal cual.
+        resultado = self.verificar("ACTIVIDADES MOODLE", "ACA", "application/vnd.google-apps.document")
+        self.assertEqual(resultado.estado, "ok", resultado.hallazgos)
+
+    def test_google_doc_fuera_de_moodle_se_avisa(self):
+        resultado = self.verificar("PDF", "G1_DOCUMENTO", "application/vnd.google-apps.document")
         self.assertEqual(resultado.estado, "con_diferencias")
         self.assertIn("documento de Google", resultado.hallazgos[0])
 

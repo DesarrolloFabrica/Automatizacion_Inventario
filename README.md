@@ -87,6 +87,10 @@ clonar a una carpeta nueva y se carga en `fabrica1`, con estas reglas:
   fecha de carga a la base.
 - **IDs limpios**: salen de las secuencias (realineadas al empezar cada carga, así
   una carga fallida no deja huecos); el programa se identifica por escuela + nombre.
+- **Solo 5 escuelas** (`gcp.ESCUELAS_OFICIALES`): `ESCUELA_DE_CIENCIAS_SOCIALES_JURIDICAS_Y_GOBIERNO`,
+  `ESCUELA_DE_DISENO_Y_COMUNICACION`, `ESCUELA_DE_INGENIERIA`, `ESCUELA_DE_SALUD_Y_BIENESTAR` y
+  `ESCUELA_DE_TRANSFORMACION_EMPRESARIAL`. Las variantes de Drive (sin "DE_", con Ñ…) van a su
+  nombre oficial; una escuela que no sea ninguna de estas detiene el lote.
 - **Nada se borra**: no hay reemplazo por programa. Un archivo de origen ya cargado
   se omite.
 - **Todo o nada por lote**: si una fila no tiene escuela, materia, código de
