@@ -82,6 +82,14 @@ class TestNombreFinal(unittest.TestCase):
     def test_doble_extension(self):
         self.assertEqual(nombres.nombre_final("G1_infografia.png.pdf", "pdf"), "G1_infografia.pdf")
 
+    def test_extension_real_fuera_de_la_lista_es_idempotente(self):
+        # TANIA: "G1_FICHAS_X.rar" daba "G1_FICHAS_X.rar.rar" y su copia ".rar.rar.rar";
+        # la limpieza de duplicados no la reconocía y la mandaba a la papelera.
+        for nombre, ext in (("G1_FICHAS_X.rar", "rar"), ("G1_FICHAS_X.rar.rar", "rar"), ("G1_x.7z", "7z")):
+            final = nombres.nombre_final(nombre, ext)
+            self.assertEqual(final, nombre.split(".")[0] + "." + ext)
+            self.assertEqual(nombres.nombre_final(final, ext), final)
+
     def test_separador_antes_de_la_extension(self):
         self.assertEqual(nombres.nombre_final("G1_mapa_png", "png"), "G1_mapa.png")
         self.assertEqual(nombres.nombre_final("G1_mapa .PNG", "png"), "G1_mapa.png")

@@ -25,9 +25,9 @@ class ExtensionRealTest(unittest.TestCase):
         # En el clon Drive deja fileExtension vacío; antes quedaba "sin extensión".
         self.assertEqual(lms.obtener_extension(archivo("G2_DOCUMENTO_DATOSpdf", "application/pdf", "")), "pdf")
 
-    def test_google_doc_nombrado_docx_queda_sin_extension(self):
-        self.assertEqual(lms.obtener_extension(archivo("ACA.docx", "application/vnd.google-apps.document", "")), "")
-        self.assertEqual(lms.obtener_extension(archivo("INVENTARIO", "application/vnd.google-apps.spreadsheet", "")), "")
+    def test_formatos_nativos_google_quedan_identificados(self):
+        self.assertEqual(lms.obtener_extension(archivo("ACA.docx", "application/vnd.google-apps.document", "")), "docs")
+        self.assertEqual(lms.obtener_extension(archivo("INVENTARIO", "application/vnd.google-apps.spreadsheet", "")), "sheets")
 
     def test_nombre_y_formato_coinciden_no_cambia(self):
         casos = [

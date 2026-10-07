@@ -161,12 +161,18 @@ def obtener_extension(archivo: dict) -> str:
     Extensión según el formato real del archivo (mimeType de Drive), no el nombre.
 
     - "G1_x.png" que en realidad es PDF → "pdf"; "G2_xpdf" (sin punto) → "pdf".
-    - Documento nativo de Google (Docs, Sheets…) → "" (sin extensión).
+    - Documento nativo de Google Docs/Sheets → "docs"/"sheets".
     - Si el nombre trae una variante del mismo formato (jpeg, ai, quiz…) se respeta.
     - Tipo genérico o desconocido (application/octet-stream…) → se usa el nombre.
     """
     por_nombre = extension_por_nombre(archivo)
     mime = str(archivo.get("mimeType") or "")
+    formatos_google = {
+        "application/vnd.google-apps.document": "docs",
+        "application/vnd.google-apps.spreadsheet": "sheets",
+    }
+    if mime in formatos_google:
+        return formatos_google[mime]
     if mime.startswith(MIME_GOOGLE_PREFIJO):
         return ""
     if mime in MIME_EXTENSION:

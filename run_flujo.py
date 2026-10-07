@@ -146,6 +146,11 @@ def construir_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Si hace falta autorizar Google, falla con un mensaje en vez de pedir el login.",
     )
+    parser.add_argument(
+        "--sin-correo",
+        action="store_true",
+        help="Completa el flujo sin enviar el correo final.",
+    )
     # Solo para pruebas: dónde guardar el estado y los logs (default corridas/ del repo).
     parser.add_argument("--dir-corridas", type=Path, default=DIR_CORRIDAS, help=argparse.SUPPRESS)
     return parser
@@ -168,7 +173,7 @@ def pasos_efectivos_a_rehacer(valores) -> set[str]:
 
 def argumentos_corrida(args: argparse.Namespace, excel: Path) -> dict:
     """Lo que se guarda en el historial de corridas del estado."""
-    return {
+    valores = {
         "excel": str(excel),
         "schema": args.schema,
         "simular": bool(args.simular),
@@ -177,6 +182,9 @@ def argumentos_corrida(args: argparse.Namespace, excel: Path) -> dict:
         "rehacer": [p for p in PASOS if p in pasos_a_rehacer(args.rehacer)],
         "no_interactivo": bool(args.no_interactivo),
     }
+    if getattr(args, "sin_correo", False):
+        valores["sin_correo"] = True
+    return valores
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +700,7 @@ def ejecutar_corrida(
 
     ruta_xlsx = exportar_estado(estado)
     correo_ok = True
-    if not args.simular and ruta_xlsx is not None:
+    if not args.simular and not getattr(args, "sin_correo", False) and ruta_xlsx is not None:
         try:
             filas_correo = []
             for fila in estado.resumen():

@@ -40,6 +40,10 @@ def extension_final(item: dict) -> str:
     """Extensión con la que queda en el clon: la real, salvo JPEG -> png (se convierte)."""
     if es_jpeg_real(item.get("name", ""), item.get("mimeType")):
         return "png"
+    # Docs y Sheets se identifican así en la base, pero su nombre nativo en
+    # Drive no debe recibir un sufijo artificial .docs/.sheets.
+    if str(item.get("mimeType") or "").startswith("application/vnd.google-apps."):
+        return ""
     return extension_real(item)
 
 

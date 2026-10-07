@@ -23,10 +23,10 @@ from .normalizacion import extension_real, nombre_final_de, origen_de
 # Si algún día aparece un tipo nuevo, es preferible dejarlo sin regla a ponerle
 # una estrecha: una regla equivocada genera cientos de avisos falsos que tapan
 # los problemas de verdad.
-# "" = documento nativo de Google (sin extensión): en ACTIVIDADES MOODLE se
-# aceptan tal cual (ACA, FORO, TEMAS Y PRESENTACION…), decidido por Camilo el 2026-10-05.
+# Los documentos nativos de Google se aceptan tal cual en ACTIVIDADES MOODLE,
+# pero se identifican como docs/sheets en la base.
 EXTENSIONES_POR_TIPO = {
-    "ACTIVIDADES MOODLE": {"txt", "docx", ""}, "SCORM": {"zip"}, "PDF": {"pdf"},
+    "ACTIVIDADES MOODLE": {"txt", "docx", "docs", "sheets"}, "SCORM": {"zip"}, "PDF": {"pdf"},
     "FICHAS": {"pdf"}, "REVISTA": {"pdf"}, "GLOSARIO": {"pdf"},
     "PORTADA MATERIA": {"png"}, "PODCAST": {"mp3"},
 }
@@ -97,7 +97,11 @@ def _extension_real(item: dict) -> str:
 
 
 def _describir(ext: str) -> str:
-    return f"«{ext}»" if ext else "un documento de Google (sin extensión)"
+    if ext == "docs":
+        return "un documento de Google Docs"
+    if ext == "sheets":
+        return "una hoja de Google Sheets"
+    return f"«{ext}»" if ext else "un archivo sin extensión"
 
 
 def _es_indexable(ruta: str, programa: str, meta: dict[str, str], parser=None) -> bool:

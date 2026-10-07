@@ -85,12 +85,18 @@ _CONOCIDAS = frozenset(_PEGADAS) | {"ai", "csv", "doc", "ini", "mov", "ppt", "qu
 _SEPARADORES = "_- ."
 
 
-def _limpiar_base(nombre: str) -> str:
-    """Quita del final las extensiones viejas, con o sin punto, hasta que no quede ninguna."""
+def _limpiar_base(nombre: str, extension_real: str = "") -> str:
+    """
+    Quita del final las extensiones viejas, con o sin punto, hasta que no quede ninguna.
+    La extensión real también se quita tras un punto aunque no esté en _CONOCIDAS
+    ("x.rar" con formato rar -> "x"); sin eso "x.rar" daría "x.rar.rar" y la copia
+    "x.rar.rar.rar", y la limpieza de duplicados mandaría la copia a la papelera.
+    """
+    quitar = _CONOCIDAS | {extension_real.lower()} if extension_real else _CONOCIDAS
     base = nombre.strip()
     while True:
         cabeza, punto, cola = base.rpartition(".")
-        if punto and cabeza.strip(_SEPARADORES) and cola.lower() in _CONOCIDAS:
+        if punto and cabeza.strip(_SEPARADORES) and cola.lower() in quitar:
             base = cabeza.rstrip(_SEPARADORES)
             continue
         minus = base.lower()
@@ -115,7 +121,7 @@ def nombre_final(nombre: str, extension_real: str) -> str:
     """
     if not extension_real:
         return nombre
-    base = _limpiar_base(nombre) or nombre.strip()
+    base = _limpiar_base(nombre, extension_real) or nombre.strip()
     return f"{base}.{extension_real.lower()}"
 
 

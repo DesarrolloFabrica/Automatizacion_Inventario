@@ -163,7 +163,7 @@ def escanear_lote(
             "archivo_hash": reg.get("archivo_hash") or "",
             "archivo_fecha_registro": reg.get("archivo_fecha_registro") or ahora,
             "archivo_activo": reg.get("archivo_activo", "true"),
-            "extension_tipo": reg.get("extension") or "",  # vacía = sin extensión (Google Docs), como en GCP
+            "extension_tipo": reg.get("extension") or "",
         })
         if con_origen:
             filas[-1]["escuela_nombre"] = escuela_oficial(filas[-1]["escuela_nombre"])
