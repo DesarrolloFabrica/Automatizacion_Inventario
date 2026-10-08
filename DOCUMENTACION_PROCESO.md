@@ -146,7 +146,7 @@ Ver la documentación de cada directorio:
 1. En el Excel, **`destino` es la carpeta raíz**. El run único crea (o reutiliza)
    dentro la carpeta del programa con el nombre exacto del origen. No se crea a
    mano. Si la raíz ya se llama como el origen (Excel antiguo), se usa directamente.  
-2. `cliente` es obligatorio. Valores admitidos: `PRODUCTO`, `TANIA`, `LMS_correcciones`
+2. `cliente` es obligatorio. Valores admitidos: `PRODUCTO`, `TANIA`, `JARVEY`, `LMS_correcciones`
    (`LMS_correcciones` se registra en GCP como cliente PRODUCTO y raíz LMS_Carga).  
 3. Los errores del Excel se reportan todos juntos (fila y motivo); se corrige una
    vez y se vuelve a ejecutar.  
@@ -187,7 +187,7 @@ en el log de la corrida.
 |---|---|
 | `El Excel RUTAS.xlsx está abierto o bloqueado.` | Cerrar el Excel y volver a ejecutar |
 | `El Excel RUTAS.xlsx tiene N fila(s) con errores. Fila 5: ...` | Corregir todas las filas indicadas (cliente no reconocido, enlace inválido, origen = destino, par repetido). El cliente vacío no es error: se deduce de Drive |
-| `No se pudo saber a qué cliente pertenece el lote «X».` | La carpeta origen no cuelga de una carpeta PRODUCTO, TANIA o LMS_CORRECCIONES: escribir el cliente en el Excel o mover la carpeta en Drive |
+| `No se pudo saber a qué cliente pertenece el lote «X».` | La carpeta origen no cuelga de una carpeta PRODUCTO, TANIA, JARVEY o LMS_CORRECCIONES: escribir el cliente en el Excel o mover la carpeta en Drive |
 | `el Excel dice X pero en Drive la carpeta cuelga de «Y»` | Aviso, no detiene el flujo: manda el Excel. Corregir la columna cliente si el valor del Excel no es el correcto |
 | `No se encontró el archivo RUTAS.xlsx.` | Parámetro `--excel` o variable `RUTAS_XLSX` |
 | `Hay que autorizar la cuenta fábrica de contenidos en Google.` / `La sesión de Google venció.` | `python renovar_token.py` eligiendo la cuenta fábrica de contenidos |

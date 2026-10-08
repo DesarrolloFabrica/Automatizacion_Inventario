@@ -53,6 +53,7 @@ python cargar_base_gcp.py -i lms_base_rutas.csv --schema fabrica_pruebas --sin-c
 |---|---|---|
 | PRODUCTO | PRODUCTO | LMS_Carga |
 | TANIA | TANIA | LMS_Carga |
+| JARVEY | JARVEY | LMS_Carga |
 | LMS_correcciones | PRODUCTO | LMS_Carga |
 
 ## Scripts

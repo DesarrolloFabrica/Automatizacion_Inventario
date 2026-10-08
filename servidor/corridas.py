@@ -23,7 +23,12 @@ from types import SimpleNamespace
 from flujo_lib.almacen import crear_almacen
 from flujo_lib.drive import extraer_id_carpeta
 from flujo_lib.estado import PASOS, EstadoCorrida
-from flujo_lib.excel import CLASIFICACIONES, Lote, normalizar_clasificacion
+from flujo_lib.excel import (
+    CLASIFICACIONES,
+    TEXTO_CLIENTES_VALIDOS,
+    Lote,
+    normalizar_clasificacion,
+)
 from flujo_lib.mensajes import ErrorFlujo
 from flujo_lib.progreso import Reporte
 
@@ -33,7 +38,6 @@ import run_flujo
 # los va añadiendo, así que se mandan todos: recortar rompería el historial.
 MAX_MENSAJES = 3000
 ESTADOS_TERMINADOS = {"ok", "con_pendientes", "fallido", "fallido_prevalidacion", "cancelada"}
-_CLIENTES_VALIDOS = "PRODUCTO, TANIA o LMS_correcciones"
 
 
 def construir_lote(
@@ -72,7 +76,7 @@ def construir_lote(
         if not clasificacion:
             raise ErrorFlujo(
                 f"El cliente «{cliente}» no existe.",
-                f"Elige {_CLIENTES_VALIDOS}, o deja que se detecte solo.",
+                f"Elige {TEXTO_CLIENTES_VALIDOS}, o deja que se detecte solo.",
                 paso="formulario",
             )
         cliente_gcp, raiz_gcp = CLASIFICACIONES[clasificacion]

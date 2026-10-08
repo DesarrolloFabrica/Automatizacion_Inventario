@@ -253,7 +253,7 @@ def parsear_ruta(partes: list[str]) -> dict[str, str] | None:
     cliente_carpeta = norm_text(partes[3])
     if cliente_carpeta not in CLIENTES_VALIDOS:
         return None
-    # En Cloud SQL el cliente solo es PRODUCTO/TANIA; correcciones → PRODUCTO
+    # En Cloud SQL el cliente es la carpeta tal cual; correcciones → PRODUCTO
     cliente = "PRODUCTO" if cliente_carpeta == "LMS_CORRECCIONES" else cliente_carpeta
 
     # Aquí se arma la base común de la jerarquía (raíz → semestre)
@@ -297,7 +297,7 @@ def escanear_drive(servicio, folder_id: str) -> list[dict]:
     """
     Escanea Drive bajo la raíz dada y devuelve registros de archivos indexables.
 
-    Prioriza la rama estándar LMS_Carga > MEN > Q2 > PRODUCTO|TANIA > ...
+    Prioriza la rama estándar LMS_Carga > MEN > Q2 > CLIENTE > ...
     Indexa archivos con código G+dígitos si lo tienen; si no, con el stem.
     """
     # Aquí se obtiene el nombre de la carpeta raíz
@@ -359,7 +359,7 @@ def escanear_drive(servicio, folder_id: str) -> list[dict]:
     nombre_raiz = raiz.get("name", "LMS_Carga")
     print(f"Raíz: {nombre_raiz}", flush=True)
 
-    # Solo ramas estándar: LMS_Carga > MEN > Q2 > PRODUCTO|TANIA > ...
+    # Solo ramas estándar: LMS_Carga > MEN > Q2 > CLIENTE > ...
     hijos_raiz = listar_hijos(servicio, folder_id)
     men = next((h for h in hijos_raiz if norm_text(h.get("name", "")) == "MEN"), None)
     if not men:

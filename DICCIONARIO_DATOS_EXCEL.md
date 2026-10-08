@@ -37,7 +37,7 @@ COLUMNAS
 |---|---|
 | **Qué es** | Clasificación del lote (quién / qué tipo de carga). |
 | **Obligatoria** | **No.** Si la columna falta o la celda está vacía, el run único deduce el cliente de dónde cuelga la carpeta origen en Drive. Solo es error escribir un valor que no existe. |
-| **Valores válidos** | `PRODUCTO`, `TANIA`, `LMS_correcciones` (y alias como `CORRECCIONES`, `LMS_CORRECCIONES`, `LMS_correccion`). Sin distinguir mayúsculas ni acentos. |
+| **Valores válidos** | `PRODUCTO`, `TANIA`, `JARVEY`, `LMS_correcciones` (y alias como `CORRECCIONES`, `LMS_CORRECCIONES`, `LMS_correccion`). Sin distinguir mayúsculas ni acentos. |
 | **Cómo se usa** | Se traduce a cliente + raíz en Cloud SQL. |
 | **Detección automática** | El material cuelga en Drive de una carpeta con el nombre del cliente: `.../Q2/PRODUCTO/ESCUELA_X/PROGRAMA/...`. El flujo sube por las carpetas padre del origen hasta encontrarla y, de paso, toma la escuela. Si la celda del Excel trae valor, **manda el Excel**, y si no coincide con Drive se avisa en el log y en el correo. |
 | **Mapeo actual a GCP** | Ver tabla abajo. |
@@ -49,6 +49,7 @@ COLUMNAS
 |---|---|---|
 | `PRODUCTO` | PRODUCTO | LMS_Carga |
 | `TANIA` | TANIA | LMS_Carga |
+| `JARVEY` | JARVEY | LMS_Carga |
 | `LMS_correcciones` (y alias) | PRODUCTO | LMS_Carga |
 
 Nota: `LMS_correcciones` es una **clasificación del lote**, no una carpeta raíz.

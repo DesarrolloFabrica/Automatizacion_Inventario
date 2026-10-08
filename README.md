@@ -106,6 +106,13 @@ psql "host=127.0.0.1 port=5432 dbname=planner_db user=planner_user" -f LMS_Fabri
 La prevalidación avisa si faltan. Con `--schema fabrica` o `--schema fabrica_pruebas`
 la carga funciona como antes (reemplazo por programa, sin columnas de origen).
 
+El alta del cliente `JARVEY` en `fabrica1.cliente` va en su propia migración (la
+carga lo crearía sola, pero así existe antes de la primera corrida):
+
+```powershell
+psql "host=127.0.0.1 port=5432 dbname=planner_db user=planner_user" -f LMS_Fabrica/migraciones/fabrica1_002_cliente_jarvey.sql
+```
+
 ### Reanudación
 
 El estado por lote (clave: origen + raíz de destino) evita repetir lo ya hecho:
@@ -238,7 +245,7 @@ En runtime:
 
 Una fila = un lote.
 
-- `cliente`: `PRODUCTO`, `TANIA` o `LMS_correcciones`. **Opcional:** si se deja vacío
+- `cliente`: `PRODUCTO`, `TANIA`, `JARVEY` o `LMS_correcciones`. **Opcional:** si se deja vacío
   se deduce de la carpeta de Drive de la que cuelga el origen. Si se escribe, manda
   el Excel y se avisa cuando no coincide con Drive.
 - `etiqueta`: apodo humano (no se guarda en GCP). Vacía → `Fila N`.

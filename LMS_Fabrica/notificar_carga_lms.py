@@ -246,7 +246,7 @@ def _html_aviso(
       Actualizados (cliente/raíz): {stats.get("archivo_actualizados", 0)}.</p>
       <p>Cliente(s): <code>{html.escape(clientes)}</code><br/>
       Raíz(ces): <code>{html.escape(raices)}</code><br/>
-      (Cliente = PRODUCTO o TANIA. LMS_correcciones usa cliente PRODUCTO y raíz LMS_Carga.)</p>
+      (Cliente = PRODUCTO, TANIA o JARVEY. LMS_correcciones usa cliente PRODUCTO y raíz LMS_Carga.)</p>
       <p>Programas de este lote (<code>programa_nombre</code> en GCP):</p>
       <ul>{progs or "<li>(ninguno)</li>"}</ul>
 

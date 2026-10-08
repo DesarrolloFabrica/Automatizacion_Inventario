@@ -32,12 +32,15 @@ except ImportError:  # la raíz del repo no está en sys.path (p. ej. importado 
     sys.path.insert(0, str(ROOT))
     from rutas_excel import resolver_rutas_excel
 
-# En el Excel hay 3 clasificaciones. En GCP `cliente` solo admite PRODUCTO/TANIA y la
-# raíz real siempre es LMS_Carga: LMS_correcciones NO es carpeta raíz, se guarda como
+# Clasificación del Excel -> (cliente que se guarda en GCP, raíz real). La raíz
+# siempre es LMS_Carga: LMS_correcciones NO es carpeta raíz, se guarda como
 # cliente PRODUCTO + raíz LMS_Carga (misma regla que LMS_Fabrica/generar_base_rutas.py).
+# Para dar de alta un cliente nuevo basta agregarlo aquí: la lectura del Excel, la
+# detección por carpeta de Drive y los mensajes de error salen de este mapa.
 CLASIFICACIONES = {
     "PRODUCTO": ("PRODUCTO", "LMS_Carga"),
     "TANIA": ("TANIA", "LMS_Carga"),
+    "JARVEY": ("JARVEY", "LMS_Carga"),
     "LMS_CORRECCIONES": ("PRODUCTO", "LMS_Carga"),
 }
 _ALIASES_CORRECCIONES = {
@@ -60,7 +63,10 @@ _ALIAS_COLUMNAS = {
 _OBLIGATORIAS = ("origen", "destino")  # `cliente` es opcional: se detecta desde Drive
 _FILAS_CABECERA = 10  # la cabecera debe estar en las primeras N filas
 _ACCION_CORREGIR = "Corrige el Excel y vuelve a ejecutar."
-_CLIENTES_VALIDOS = "PRODUCTO, TANIA o LMS_CORRECCIONES"
+# Lista para los mensajes ("PRODUCTO, TANIA, JARVEY o LMS_CORRECCIONES"), sacada
+# de CLASIFICACIONES para que no se quede atrás al agregar un cliente.
+CLIENTES_VALIDOS = tuple(CLASIFICACIONES)
+TEXTO_CLIENTES_VALIDOS = ", ".join(CLIENTES_VALIDOS[:-1]) + f" o {CLIENTES_VALIDOS[-1]}"
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +86,7 @@ def norm_text(value: object) -> str:
 
 def normalizar_clasificacion(valor: object) -> str | None:
     """
-    Traduce la columna cliente del Excel a PRODUCTO / TANIA / LMS_CORRECCIONES.
+    Traduce la columna cliente del Excel a una de las CLASIFICACIONES.
     Acepta alias de correcciones (LMS_correccion, Correcciones, LMSCORRECIONES...).
     Devuelve None si el valor está vacío o no es válido.
     """
@@ -93,7 +99,7 @@ def normalizar_clasificacion(valor: object) -> str | None:
         or texto.startswith("LMSCORREC")
     ):
         return "LMS_CORRECCIONES"
-    if texto in ("PRODUCTO", "TANIA"):
+    if texto in CLASIFICACIONES:
         return texto
     return None
 
@@ -253,7 +259,7 @@ def _leer_fila(numero: int, fila: tuple, columnas: dict[str, int | None]) -> tup
     # (ver flujo_lib/clasificacion.py). Solo se rechaza un valor escrito que no existe.
     clasificacion = normalizar_clasificacion(cliente_raw)
     if cliente_raw and clasificacion is None:
-        fallas.append(f"cliente «{cliente_raw}» no reconocido (usa {_CLIENTES_VALIDOS})")
+        fallas.append(f"cliente «{cliente_raw}» no reconocido (usa {TEXTO_CLIENTES_VALIDOS})")
 
     ids: dict[str, str | None] = {}
     for columna, crudo in (("origen", origen_raw), ("destino", destino_raw)):

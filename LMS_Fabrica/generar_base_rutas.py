@@ -86,9 +86,11 @@ def cargar_metadata_programas(*fuentes: Path) -> dict[str, dict[str, str]]:
     return meta
 
 
-# En el Excel hay 3 clasificaciones. En GCP, cliente solo admite PRODUCTO/TANIA.
-# LMS_correcciones NO es carpeta raíz: la raíz real sigue siendo LMS_Carga.
-# Se guarda como cliente PRODUCTO + raíz LMS_Carga (clasificación operativa).
+# Clasificaciones del Excel. La raíz real siempre es LMS_Carga.
+# LMS_correcciones NO es carpeta raíz: se guarda como cliente PRODUCTO + raíz
+# LMS_Carga (clasificación operativa). El resto son clientes de GCP tal cual.
+# Debe quedar alineado con CLASIFICACIONES de flujo_lib/excel.py.
+_CLIENTES_DIRECTOS = ("PRODUCTO", "TANIA", "JARVEY")
 _ALIASES_CORRECCIONES = {
     "LMS_CORRECCIONES",
     "LMS_CORRECCION",
@@ -111,7 +113,7 @@ def es_clasificacion_correcciones(texto: str) -> bool:
 def normalizar_clasificacion(valor: object) -> dict[str, str] | None:
     """
     Traduce el valor de la columna cliente del Excel a cliente+raíz de GCP.
-    PRODUCTO/TANIA/LMS_correcciones → raíz LMS_Carga (carpeta raíz real).
+    PRODUCTO/TANIA/JARVEY/LMS_correcciones → raíz LMS_Carga (carpeta raíz real).
     LMS_correcciones (y alias) → cliente PRODUCTO; no inventa raíz LMS_CORRECCIONES.
     """
     texto = norm_text(valor)
@@ -123,10 +125,8 @@ def normalizar_clasificacion(valor: object) -> dict[str, str] | None:
             "cliente": "PRODUCTO",
             "raiz": "LMS_Carga",
         }
-    if texto == "TANIA":
-        return {"clasificacion": "TANIA", "cliente": "TANIA", "raiz": "LMS_Carga"}
-    if texto == "PRODUCTO":
-        return {"clasificacion": "PRODUCTO", "cliente": "PRODUCTO", "raiz": "LMS_Carga"}
+    if texto in _CLIENTES_DIRECTOS:
+        return {"clasificacion": texto, "cliente": texto, "raiz": "LMS_Carga"}
     return None
 
 
@@ -197,7 +197,7 @@ def leer_rutas_excel(ruta: Path) -> list[tuple[str, str, dict[str, str] | None]]
                 if clasif is None:
                     raise ValueError(
                         f"Clasificación inválida en fila '{etiqueta}': {crudo!r}. "
-                        "Usa TANIA, PRODUCTO o LMS_CORRECCIONES."
+                        "Usa PRODUCTO, TANIA, JARVEY o LMS_CORRECCIONES."
                     )
         rutas.append((etiqueta, url, clasif))
     return rutas
@@ -562,7 +562,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--excel",
         default=str(EXCEL_DEFAULT),
-        help="Excel/CSV con destino y clasificación: TANIA, PRODUCTO o LMS_CORRECCIONES.",
+        help="Excel/CSV con destino y clasificación: PRODUCTO, TANIA, JARVEY o LMS_CORRECCIONES.",
     )
     parser.add_argument("-o", "--salida", default=str(SALIDA_DEFAULT))
     parser.add_argument("--referencia", default=str(REF_DEFAULT))

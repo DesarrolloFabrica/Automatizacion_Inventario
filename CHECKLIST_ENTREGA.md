@@ -17,7 +17,7 @@ A. PREPARACIÓN
       (la crea el flujo con el nombre exacto del origen)
 - [ ] Excel guardado y cerrado
 - [ ] Enlaces o IDs de origen y destino válidos y distintos; sin pares origen/destino repetidos
-- [ ] Valores de `cliente` válidos: `PRODUCTO`, `TANIA` o `LMS_correcciones`
+- [ ] Valores de `cliente` válidos: `PRODUCTO`, `TANIA`, `JARVEY` o `LMS_correcciones`
 - [ ] Token único en la **raíz del repo**: `credentials.json` + `token.json` (Drive, Sheets, Gmail)
       de la cuenta fábrica de contenidos (`python renovar_token.py` si falta o venció)
 - [ ] `.env` en la raíz con `CORREOS_AVISO` y `DB_*`

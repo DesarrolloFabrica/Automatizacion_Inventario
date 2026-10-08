@@ -30,8 +30,8 @@ MAX_NIVELES = 12
 class ClasificacionDetectada:
     """Lo que se pudo deducir de la ubicación de la carpeta en Drive."""
 
-    clasificacion: str  # PRODUCTO | TANIA | LMS_CORRECCIONES
-    cliente: str  # lo que se guarda en Cloud SQL (PRODUCTO o TANIA)
+    clasificacion: str  # una clave de CLASIFICACIONES (PRODUCTO, TANIA, JARVEY, LMS_CORRECCIONES)
+    cliente: str  # lo que se guarda en Cloud SQL (PRODUCTO, TANIA o JARVEY)
     raiz: str  # siempre LMS_Carga
     carpeta: str  # nombre de la carpeta donde se encontró
     escuela: str  # carpeta justo debajo del cliente ("" si no parece una escuela)

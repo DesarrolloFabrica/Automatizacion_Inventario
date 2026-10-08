@@ -60,6 +60,7 @@ class TestNormalizarClasificacion(unittest.TestCase):
         self.assertEqual(normalizar_clasificacion("PRODUCTO"), "PRODUCTO")
         self.assertEqual(normalizar_clasificacion(" producto "), "PRODUCTO")
         self.assertEqual(normalizar_clasificacion("Tania"), "TANIA")
+        self.assertEqual(normalizar_clasificacion(" jarvey "), "JARVEY")
 
     def test_alias_correcciones(self):
         for valor in (
@@ -83,6 +84,7 @@ class TestNormalizarClasificacion(unittest.TestCase):
     def test_clasificaciones_mapean_a_gcp(self):
         self.assertEqual(CLASIFICACIONES["PRODUCTO"], ("PRODUCTO", "LMS_Carga"))
         self.assertEqual(CLASIFICACIONES["TANIA"], ("TANIA", "LMS_Carga"))
+        self.assertEqual(CLASIFICACIONES["JARVEY"], ("JARVEY", "LMS_Carga"))
         self.assertEqual(CLASIFICACIONES["LMS_CORRECCIONES"], ("PRODUCTO", "LMS_Carga"))
 
     def test_norm_text(self):

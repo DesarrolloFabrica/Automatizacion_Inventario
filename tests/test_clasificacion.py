@@ -92,6 +92,14 @@ class TestDetectar(BaseArbol):
         self.assertEqual(hallado.clasificacion, "TANIA")
         self.assertEqual(hallado.cliente, "TANIA")
 
+    def test_jarvey(self):
+        origen = self.cadena("LMS_Carga", "MEN", "Q2", "JARVEY", "ESCUELA_Y", "PROGRAMA")
+        hallado = detectar(self.fake, origen)
+        self.assertEqual(hallado.clasificacion, "JARVEY")
+        self.assertEqual(hallado.cliente, "JARVEY")
+        self.assertEqual(hallado.raiz, "LMS_Carga")
+        self.assertEqual(hallado.escuela, "ESCUELA_Y")
+
     def test_correcciones_se_guarda_como_producto(self):
         origen = self.cadena("LMS_CORRECCIONES", "ESCUELA_Z", "PROGRAMA")
         hallado = detectar(self.fake, origen)

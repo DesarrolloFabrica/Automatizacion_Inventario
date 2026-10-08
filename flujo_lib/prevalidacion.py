@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from . import ROOT, drive
 from .clasificacion import detectar as detectar_clasificacion
-from .excel import CLASIFICACIONES, Lote, leer_lotes
+from .excel import CLASIFICACIONES, TEXTO_CLIENTES_VALIDOS, Lote, leer_lotes
 from .mensajes import traducir_excepcion
 
 NIVELES = ("ok", "aviso", "error")
@@ -191,65 +191,112 @@ def _revisar_drive(res: ResultadoPrevalidacion, log) -> None:
 
 def _revisar_cliente(res: ResultadoPrevalidacion, log, detectar=None) -> None:
     """
-    A qué cliente pertenece cada lote: lo que diga el Excel o, si viene vacío, la
-    carpeta de Drive de la que cuelga el origen (PRODUCTO, TANIA, LMS_CORRECCIONES).
-    Cuando el Excel y Drive no coinciden manda el Excel, pero se avisa.
+    A qué cliente pertenece cada lote y de qué escuela es.
+
+    Manda la columna `cliente` del Excel. Si viene vacía se mira de qué carpeta
+    cuelga el ORIGEN en Drive (ver CLASIFICACIONES en excel.py), y cuando el
+    Excel y Drive no coinciden se usa el Excel pero se avisa.
+
+    La escuela sale de la misma búsqueda. Cuando el origen no la da —material
+    que vive fuera del árbol LMS_Carga, p. ej. en una carpeta de trabajo— se
+    busca en la RAÍZ DE DESTINO, que sí cuelga de CLIENTE / ESCUELA_…. Es solo
+    respaldo: lo que diga el origen siempre gana.
     """
     if res.svc is None or not res.lotes:
         return
     detectar = detectar or detectar_clasificacion
     log("Revisando a qué cliente pertenece cada lote...")
     resueltos: list[Lote] = []
-    cache: dict[str, object] = {}  # mismo origen en varios lotes: una sola búsqueda
+    cache: dict[str, object] = {}  # misma carpeta en varios lotes: una sola búsqueda
+
+    def buscar(folder_id: str, papel: str, lote: Lote):
+        """Clasificación de esa carpeta, o None. Un fallo se reporta y no corta."""
+        if folder_id in cache:
+            return cache[folder_id]
+        try:
+            hallado = detectar(res.svc, folder_id, inicial=res.carpetas.get(folder_id))
+        except Exception as e:
+            err = traducir_excepcion(
+                e, paso="cliente", contexto=f"la carpeta {papel} del lote «{lote.etiqueta}»"
+            )
+            nivel = "aviso" if lote.clasificacion else "error"
+            res.agregar(nivel, "cliente", err.motivo, err.accion, err.detalle)
+            return None
+        cache[folder_id] = hallado
+        return hallado
+
     for lote in res.lotes:
         if lote.origen_id not in res.carpetas:
             resueltos.append(lote)  # el acceso al origen ya falló: no insistir
             continue
-        contexto = f"la carpeta origen del lote «{lote.etiqueta}»"
-        hallado = None
-        try:
-            if lote.origen_id in cache:
-                hallado = cache[lote.origen_id]
-            else:
-                hallado = detectar(
-                    res.svc, lote.origen_id, inicial=res.carpetas[lote.origen_id]
-                )
-                cache[lote.origen_id] = hallado
-        except Exception as e:
-            err = traducir_excepcion(e, paso="cliente", contexto=contexto)
-            nivel = "aviso" if lote.clasificacion else "error"
-            res.agregar(nivel, "cliente", err.motivo, err.accion, err.detalle)
+        hallado = buscar(lote.origen_id, "origen", lote)
 
-        if hallado is None and not lote.clasificacion:
+        # Respaldo por el destino: solo si el origen no resolvió el cliente o
+        # dejó la escuela vacía, y si la raíz de destino se pudo leer.
+        respaldo = None
+        if lote.destino_raiz_id in res.carpetas and (hallado is None or not hallado.escuela):
+            respaldo = buscar(lote.destino_raiz_id, "destino", lote)
+
+        if hallado is None and respaldo is None and not lote.clasificacion:
             res.agregar(
                 "error",
                 "cliente",
                 f"No se pudo saber a qué cliente pertenece el lote «{lote.etiqueta}».",
-                "Escribe PRODUCTO, TANIA o LMS_CORRECCIONES en la columna cliente del "
+                f"Escribe {TEXTO_CLIENTES_VALIDOS} en la columna cliente del "
                 "Excel, o mueve la carpeta dentro de la carpeta del cliente en Drive.",
             )
             resueltos.append(lote)
             continue
 
+        escuela = lote.escuela_gcp or getattr(hallado, "escuela", "")
+        # Del destino se hereda el cliente solo si no lo dijeron ni el Excel ni
+        # el origen; la escuela, siempre que no la haya dado ya el origen.
+        cliente_del_destino = respaldo is not None and hallado is None and not lote.clasificacion
+        escuela_del_destino = respaldo is not None and not escuela and bool(respaldo.escuela)
+        if escuela_del_destino:
+            escuela = respaldo.escuela
+
+        if cliente_del_destino:
+            nota = f" (escuela «{escuela}»)" if escuela else ""
+            res.agregar(
+                "aviso",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: el origen no cuelga de ninguna carpeta de cliente; "
+                f"se toma {respaldo.clasificacion} de la raíz de destino «{respaldo.carpeta}»{nota}.",
+                "Si no es correcto, escribe el cliente en el Excel o mueve la carpeta en Drive.",
+                detalle=" / ".join(respaldo.ruta),
+            )
+        elif escuela_del_destino:
+            res.agregar(
+                "aviso",
+                "cliente",
+                f"Lote «{lote.etiqueta}»: el origen no dice de qué escuela es; se toma "
+                f"«{escuela}», que es de donde cuelga la raíz de destino.",
+                "Si no es correcto, mueve la carpeta de destino bajo la escuela que corresponde.",
+                detalle=" / ".join(respaldo.ruta),
+            )
+
         if not lote.clasificacion:  # el Excel no lo dijo: mandan las carpetas de Drive
-            cliente, raiz = CLASIFICACIONES[hallado.clasificacion]
+            fuente = hallado or respaldo
+            cliente, raiz = CLASIFICACIONES[fuente.clasificacion]
             resueltos.append(
                 replace(
                     lote,
-                    clasificacion=hallado.clasificacion,
+                    clasificacion=fuente.clasificacion,
                     cliente_gcp=cliente,
                     raiz_gcp=raiz,
-                    escuela_gcp=hallado.escuela,
+                    escuela_gcp=escuela,
                 )
             )
-            res.agregar(
-                "ok",
-                "cliente",
-                f"Lote «{lote.etiqueta}»: cliente {hallado.clasificacion} detectado "
-                f"en la carpeta «{hallado.carpeta}» de Drive"
-                + (f" (escuela «{hallado.escuela}»)." if hallado.escuela else "."),
-                detalle=" / ".join(hallado.ruta),
-            )
+            if fuente is hallado:
+                res.agregar(
+                    "ok",
+                    "cliente",
+                    f"Lote «{lote.etiqueta}»: cliente {hallado.clasificacion} detectado "
+                    f"en la carpeta «{hallado.carpeta}» de Drive"
+                    + (f" (escuela «{escuela}»)." if escuela else "."),
+                    detalle=" / ".join(hallado.ruta),
+                )
             continue
 
         # El Excel trae valor: manda, pero se compara con lo que dice Drive.
@@ -270,8 +317,7 @@ def _revisar_cliente(res: ResultadoPrevalidacion, log, detectar=None) -> None:
                 f"Lote «{lote.etiqueta}»: cliente {lote.clasificacion} según el Excel"
                 + (" (coincide con Drive)." if hallado is not None else "."),
             )
-        escuela = hallado.escuela if hallado is not None else ""
-        resueltos.append(replace(lote, escuela_gcp=lote.escuela_gcp or escuela))
+        resueltos.append(replace(lote, escuela_gcp=escuela))
     res.lotes[:] = resueltos
 
 
@@ -309,7 +355,7 @@ def _revisar_escuela(res: ResultadoPrevalidacion, schema: str) -> None:
                 "cliente",
                 f"Lote «{lote.etiqueta}»: no se encontró la carpeta ESCUELA_… por encima del "
                 f"origen. {schema} exige escuela y la carga de ese lote fallará si no aparece.",
-                "Revisa que el origen esté dentro de PRODUCTO / ESCUELA_… / PROGRAMA en Drive.",
+                "Revisa que el origen esté dentro de CLIENTE / ESCUELA_… / PROGRAMA en Drive.",
             )
 
 

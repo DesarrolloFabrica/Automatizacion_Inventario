@@ -187,6 +187,51 @@ class BasePrevalidacion(unittest.TestCase):
         return hallazgos[0]
 
 
+class TestClienteDesdeDestino(BasePrevalidacion):
+    """
+    Material que vive fuera del árbol LMS_Carga: el origen no dice cliente ni
+    escuela, pero la raíz de destino cuelga de CLIENTE / ESCUELA_….
+    """
+
+    def armar_destino(self) -> str:
+        carga = self.fake.agregar_carpeta("LMS_Carga")
+        q2 = self.fake.agregar_carpeta("Q2", self.fake.agregar_carpeta("MEN", carga))
+        jarvey = self.fake.agregar_carpeta("JARVEY", q2)
+        return self.fake.agregar_carpeta("ESCUELA_DE_SALUD_Y_BIENESTAR", jarvey)
+
+    def excel_suelto(self, cliente: str = "") -> Path:
+        # ORIGEN_B ("Medellín 2026") cuelga de la nada: no hay carpeta de cliente.
+        return self.excel([CABECERA, [cliente, "Diplomado", ORIGEN_B, self.armar_destino()]])
+
+    def test_sin_cliente_en_el_excel_se_toma_del_destino(self):
+        res = self.prevalidar(self.excel_suelto())
+        lote = res.lotes[0]
+        self.assertEqual(lote.clasificacion, "JARVEY")
+        self.assertEqual(lote.cliente_gcp, "JARVEY")
+        self.assertEqual(lote.escuela_gcp, "ESCUELA_DE_SALUD_Y_BIENESTAR")
+        self.assertIn("raíz de destino", self.unico(res, "cliente", "aviso").mensaje)
+
+    def test_con_cliente_en_el_excel_solo_se_hereda_la_escuela(self):
+        res = self.prevalidar(self.excel_suelto("JARVEY"))
+        lote = res.lotes[0]
+        self.assertEqual(lote.cliente_gcp, "JARVEY")
+        self.assertEqual(lote.escuela_gcp, "ESCUELA_DE_SALUD_Y_BIENESTAR")
+        aviso = self.unico(res, "cliente", "aviso").mensaje
+        self.assertIn("no dice de qué escuela es", aviso)
+        self.assertIn("ESCUELA_DE_SALUD_Y_BIENESTAR", aviso)
+
+    def test_el_origen_gana_cuando_si_lo_dice(self):
+        """Si el origen ya trae cliente y escuela, el destino ni se consulta."""
+        tania = self.fake.agregar_carpeta("TANIA")
+        escuela = self.fake.agregar_carpeta("ESCUELA_DE_INGENIERIA", tania)
+        origen = self.fake.agregar_carpeta("PROGRAMA_X", escuela)
+        res = self.prevalidar(self.excel([CABECERA, ["", "X", origen, self.armar_destino()]]))
+        lote = res.lotes[0]
+        self.assertEqual(lote.cliente_gcp, "TANIA")
+        self.assertEqual(lote.escuela_gcp, "ESCUELA_DE_INGENIERIA")
+        self.assertEqual(self.por_area(res, "cliente", "aviso"), [])
+
+
 # ---------------------------------------------------------------------------
 # Todo en orden
 # ---------------------------------------------------------------------------
