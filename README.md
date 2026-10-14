@@ -128,13 +128,32 @@ Además del comando, el flujo se puede lanzar desde una página. Es la misma
 ejecución: la web reutiliza `run_flujo.ejecutar_corrida`, así que no hay dos
 comportamientos que mantener.
 
+### Quién puede entrar
+
+La página **exige iniciar sesión con Google** y solo deja pasar a los correos
+de la variable `USUARIOS_PERMITIDOS`. Quien no esté en esa lista entra con
+Google, Google confirma quién es, y la página responde que esa cuenta no tiene
+acceso: no hay alta automática. Quitar un correo de la lista cierra su sesión
+en la siguiente petición, sin esperar a que caduque.
+
+Esto vale también para el equipo: antes de levantar el servidor hay que
+rellenar en el `.env` el `GOOGLE_OAUTH_CLIENT_ID`, el
+`GOOGLE_OAUTH_CLIENT_SECRET` y el propio correo en `USUARIOS_PERMITIDOS`, y
+poner `COOKIE_SEGURA=0` (en `http://localhost` una cookie «Secure» no se
+guardaría). El `.env.example` lo explica campo por campo, y
+`despliegue/README.md`, sección 9, cuenta cómo se crea el cliente OAuth.
+
+Si falta algo de eso, el servidor arranca igual pero responde a todo con un
+`503` que dice exactamente qué variable falta: así el fallo se ve en los
+registros en vez de quedar en un bucle de reinicios.
+
 Levantarlo en el equipo:
 
 ```powershell
 python -m uvicorn servidor.app:app --port 8080
 ```
 
-Y abrir `http://127.0.0.1:8080`. La página pide la carpeta de origen, la de
+Y abrir `http://127.0.0.1:8080`. Tras entrar con Google, la página pide la carpeta de origen, la de
 destino y poco más; el cliente se detecta solo. Al pulsar Ejecutar se encola la
 corrida y la pantalla va mostrando los cinco pasos con su barra de avance, los
 mensajes del momento y, al terminar, el resultado con los enlaces.

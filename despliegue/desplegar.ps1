@@ -42,6 +42,8 @@ param(
     [string] $SecretoClaveBd        = "fabrica-db-password",
     [string] $SecretoToken          = "fabrica-google-token",
     [string] $SecretoCuentaServicio = "fabrica-google-sa",
+    [string] $SecretoOauth          = "fabrica-oauth-secret",
+    [string] $SecretoSesion         = "fabrica-sesion-secreto",
 
     # Recursos de la revision. Se pueden subir si algun lote grande no cabe.
     [string] $Cpu        = "2",
@@ -190,7 +192,11 @@ $obligatorias = @(
     "DB_USER",
     "BUCKET_ESTADO",
     "CORREOS_AVISO",
-    "GOOGLE_CREDENCIALES_MODO"
+    "GOOGLE_CREDENCIALES_MODO",
+    # Sin estas tres nadie puede entrar en la pagina (ver plantilla, seccion 6).
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "USUARIOS_PERMITIDOS",
+    "URL_PUBLICA"
 )
 
 $faltan = @()
@@ -267,7 +273,32 @@ switch ($modo) {
     }
 }
 
-# 2.5 Aviso bien visible si se va a cargar directamente en PRODUCCION.
+# 2.5 Acceso a la pagina: la lista de autorizados y la URI de redireccion.
+$permitidos = @($vars["USUARIOS_PERMITIDOS"].Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($permitidos.Count -eq 0) {
+    Terminar-Con-Error `
+        "USUARIOS_PERMITIDOS esta vacio: nadie podria entrar en la pagina." `
+        "Pon los correos autorizados separados por coma en $Archivo."
+}
+foreach ($correo in $permitidos) {
+    if ($correo -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+        Terminar-Con-Error `
+            "USUARIOS_PERMITIDOS tiene una entrada que no parece un correo: '$correo'." `
+            "Separa los correos solo con comas, sin espacios ni nombres."
+    }
+}
+Escribir-Ok "$($permitidos.Count) persona(s) autorizada(s): $($permitidos -join ', ')"
+
+$urlPublica = $vars["URL_PUBLICA"].TrimEnd("/")
+if (-not $urlPublica.StartsWith("https://")) {
+    Escribir-Aviso "URL_PUBLICA no empieza por https://. La cookie de sesion solo viaja por https."
+}
+Write-Host ""
+Write-Host "  Esta URI tiene que estar registrada en el cliente OAuth de Google:" -ForegroundColor White
+Write-Host "    $urlPublica/api/sesion/callback" -ForegroundColor White
+Write-Host "  (Consola de Google Cloud > Credenciales > el ID de cliente > URI de redireccionamiento)"
+
+# 2.6 Aviso bien visible si se va a cargar directamente en PRODUCCION.
 $esquema = $vars["SCHEMA_POR_DEFECTO"]
 if ($esquema -eq "fabrica") {
     Write-Host ""
@@ -291,7 +322,8 @@ Escribir-Titulo "3. Variables de entorno del servicio"
 $noSeEnvian = @(
     "PROYECTO", "REGION", "SERVICIO", "CUENTA_SERVICIO",   # solo para el despliegue
     "PORT",                                                 # la pone Cloud Run
-    "DB_PASSWORD"                                           # viene de Secret Manager
+    "DB_PASSWORD",                                          # viene de Secret Manager
+    "GOOGLE_OAUTH_CLIENT_SECRET", "SESION_SECRETO"          # idem
 )
 
 $lineasYaml = New-Object System.Collections.Generic.List[string]
@@ -321,7 +353,10 @@ Escribir-Ok "$($enviadas.Count) variables preparadas: $($enviadas -join ', ')"
 
 # Secretos: la clave de la base como variable de entorno; las credenciales de
 # Google como archivo montado dentro del contenedor.
-$secretos = "DB_PASSWORD=${SecretoClaveBd}:latest,${rutaSecretoGoogle}=${secretoGoogle}:latest"
+$secretos = "DB_PASSWORD=${SecretoClaveBd}:latest" +
+            ",GOOGLE_OAUTH_CLIENT_SECRET=${SecretoOauth}:latest" +
+            ",SESION_SECRETO=${SecretoSesion}:latest" +
+            ",${rutaSecretoGoogle}=${secretoGoogle}:latest"
 
 $argumentos = @(
     "run", "deploy", $vars["SERVICIO"],

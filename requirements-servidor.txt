@@ -29,6 +29,10 @@ google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
 # httplib2 se usa de forma explicita en flujo_lib/certificados.py (httplib2.CA_CERTS).
 httplib2>=0.22.0
+# Canje del codigo OAuth al entrar con Google (servidor/autenticacion.py). Ya
+# venia de forma indirecta con google-auth-oauthlib; se declara porque ahora se
+# importa de forma explicita y no debe desaparecer si cambia esa dependencia.
+requests>=2.32.0
 
 # --- Servicios de Google Cloud -------------------------------------------
 # Estado de las corridas persistido en un bucket (sobrevive a un reinicio).

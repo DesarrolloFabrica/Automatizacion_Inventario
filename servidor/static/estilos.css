@@ -725,3 +725,118 @@ body {
   .campo--ruta .campo__nota { min-height: 0; }
   .boton--quitar { justify-self: start; }
 }
+
+/* ==========================================================================
+   Acceso: pantalla de entrada y sesión en la cabecera
+   ========================================================================== */
+
+/* ---------- Pantalla de entrada ---------- */
+
+.cuerpo-entrada {
+  /* Sin cabecera ni pie: la tarjeta es lo único que hay, y se centra. */
+  min-height: 100vh;
+  display: flex;
+}
+
+.entrada {
+  margin: auto;
+  padding: 24px 16px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.entrada__tarjeta { text-align: center; }
+
+.entrada__titulo {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.entrada__sub {
+  margin: 2px 0 20px;
+  font-size: 13px;
+  color: var(--texto-suave);
+}
+
+.entrada__explicacion {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--texto-suave);
+}
+
+/* Es un enlace con pinta de botón: hay que devolverle lo que pierde al no
+   ser un <button> (el subrayado, la caja y la alineación del texto). */
+.entrada__boton {
+  display: block;
+  text-decoration: none;
+  text-align: center;
+}
+
+.entrada__pie {
+  margin: 20px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--texto-suave);
+}
+
+.entrada__aviso {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.entrada__aviso--error {
+  color: var(--rojo);
+  background: var(--rojo-claro);
+  border-color: var(--rojo);
+}
+
+.entrada__aviso--neutro {
+  color: var(--texto-suave);
+  background: var(--gris-claro);
+  border-color: var(--borde);
+}
+
+/* ---------- Sesión en la cabecera ---------- */
+
+.sesion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+.sesion__correo {
+  /* En pantallas estrechas un correo largo no debe empujar al botón fuera. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24ch;
+}
+
+.sesion__salir {
+  flex: none;
+  font-size: 12.5px;
+  padding: 5px 10px;
+  text-decoration: none;
+}
+
+@media (max-width: 720px) {
+  .sesion__correo { max-width: 18ch; }
+}
+
+.cabecera__estado {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+@media (max-width: 720px) {
+  .cabecera__estado { align-items: flex-start; }
+}

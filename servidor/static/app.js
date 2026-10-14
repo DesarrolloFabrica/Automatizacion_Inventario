@@ -74,8 +74,23 @@
   var parametros = new URLSearchParams(window.location.search);
   var MODO_DEMO = parametros.get('demo') === '1';
 
+  // Se marca para no disparar varias redirecciones a la vez: el sondeo y la
+  // salud pueden recibir el 401 en el mismo instante.
+  var saliendo = false;
+
+  function volverAEntrar() {
+    if (saliendo) { return; }
+    saliendo = true;
+    window.location.assign('/login?destino=' + encodeURIComponent(window.location.pathname));
+  }
+
   function pedirJson(ruta, opciones) {
     return fetch(ruta, opciones).then(function (respuesta) {
+      // La sesión caducó mientras la página estaba abierta: no hay nada que
+      // mostrar aquí, se vuelve a la pantalla de entrada.
+      if (respuesta.status === 401) {
+        volverAEntrar();
+      }
       // El cuerpo se lee siempre: en los 400/409 es donde viene el motivo
       // escrito en lenguaje sencillo que hay que mostrar tal cual.
       return respuesta.text().then(function (crudo) {
@@ -93,6 +108,9 @@
   }
 
   var apiReal = {
+    sesion: function () {
+      return pedirJson('/api/sesion');
+    },
     salud: function () {
       return pedirJson('/api/salud');
     },
@@ -319,6 +337,26 @@
       esquema.textContent = 'Esquema: ' + nombreEsquema + ' — atención: esto es producción';
       esquema.classList.add('salud__dato--peligro');
     }
+  }
+
+  /* ----------------------------------------------------------------------
+     Quién está dentro
+     ---------------------------------------------------------------------- */
+
+  function cargarSesion() {
+    api.sesion().then(function (datos) {
+      if (!datos || !datos.correo) { return; }
+      var caja = $('sesion');
+      var correo = $('sesion-correo');
+      correo.textContent = datos.correo;
+      // El nombre completo no cabe en la cabecera, pero sí en el título
+      // emergente y en lo que lee un lector de pantalla.
+      correo.title = datos.nombre ? datos.nombre + ' · ' + datos.correo : datos.correo;
+      caja.hidden = false;
+    }).catch(function () {
+      // Un fallo de red aquí no impide trabajar: la cabecera se queda sin el
+      // correo y el 401, si lo hubiera, ya mandó a la pantalla de entrada.
+    });
   }
 
   function cargarSalud() {
@@ -996,6 +1034,7 @@
         'ni la base de datos. Quita ?demo=1 de la dirección para usarlo de verdad.';
     }
 
+    cargarSesion();
     cargarSalud();
     cargarHistorial();
   }
@@ -1290,6 +1329,10 @@
     }
 
     return {
+      sesion: function () {
+        return responder({ correo: 'demo@cun.edu.co', nombre: 'Cuenta de demostración' });
+      },
+
       salud: function () {
         return responder({
           ok: true,

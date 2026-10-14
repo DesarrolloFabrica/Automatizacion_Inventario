@@ -30,9 +30,12 @@ servidor/  (servicio web: página + API)
   app.py                     Aplicación FastAPI: API y página estática
   corridas.py                Cola de corridas, ejecución en hilo y avance
   configuracion.py           Variables de entorno y credenciales del servicio
+  autenticacion.py           Entrar con Google y lista de personas autorizadas
   static/index.html          Formulario y pantalla de avance
   static/estilos.css         Estilos
   static/app.js              Lógica de la página (sondeo del avance)
+  static/login.html          Pantalla de entrada
+  static/login.js            Mensajes de la pantalla de entrada
 
 
 ==================================================

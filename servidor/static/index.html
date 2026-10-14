@@ -15,9 +15,15 @@
       <h1 class="cabecera__titulo">Clonación e inventario</h1>
       <p class="cabecera__sub">Fábrica de contenido · CUN</p>
     </div>
-    <div class="salud" id="salud" aria-live="polite">
-      <span class="salud__dato" id="salud-cuenta">Cuenta: comprobando…</span>
-      <span class="salud__dato" id="salud-esquema">Esquema: comprobando…</span>
+    <div class="cabecera__estado">
+      <div class="salud" id="salud" aria-live="polite">
+        <span class="salud__dato" id="salud-cuenta">Cuenta: comprobando…</span>
+        <span class="salud__dato" id="salud-esquema">Esquema: comprobando…</span>
+      </div>
+      <div class="sesion" id="sesion" hidden>
+        <span class="sesion__correo" id="sesion-correo"></span>
+        <a class="boton boton--secundario sesion__salir" href="/api/sesion/cerrar">Salir</a>
+      </div>
     </div>
   </header>
 

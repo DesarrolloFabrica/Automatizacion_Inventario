@@ -17,12 +17,14 @@ final de una línea significa "el comando sigue en la línea siguiente".
 > producción** (`planner_db`, esquema `fabrica`), además de enviar correos desde
 > la cuenta `fabricadecontenidos@cun.edu.co`.
 >
-> **Nunca** se despliega con `--allow-unauthenticated`. **Nunca** se deja la URL
-> abierta al público ni se comparte fuera del equipo. Cualquiera que abra la
-> página puede lanzar una corrida que mueve archivos y toca la base.
+> Por eso **la página exige iniciar sesión con Google** y solo deja pasar a los
+> correos de `USUARIOS_PERMITIDOS`. Esa lista es lo que decide quién puede
+> lanzar una corrida: mantenla corta y revísala.
 >
-> Si alguna vez ves el servicio marcado como "Permitir invocaciones no
-> autenticadas" en la consola de Cloud Run, quítalo inmediatamente
+> Marcar el servicio como "Permitir invocaciones no autenticadas" en Cloud Run
+> **solo** es admisible como decisión consciente y con el login ya configurado
+> y probado; nunca por descuido ni «para salir del paso mientras tanto». Si lo
+> ves puesto y nadie sabe por qué, quítalo
 > (ver [9. Restringir quién entra](#9-restringir-quién-entra)).
 
 ---
@@ -322,6 +324,10 @@ gcloud projects get-iam-policy it-fab-contenido-edu-1 `
 ## 6. Secretos
 
 Nada de esto se escribe en `variables.env`, ni en el `Dockerfile`, ni en Git.
+
+Son cuatro: la contraseña de la base (6.1), las credenciales de Google del flujo
+(6.2) y los dos del login de la página —el secreto del cliente OAuth y la
+semilla que firma las cookies—, que se crean en la [sección 9.2](#92-el-cliente-oauth-una-sola-vez).
 
 ### 6.1 Contraseña de la base de datos
 
@@ -628,81 +634,119 @@ Eso abre un túnel local con tu identidad: entra en <http://localhost:8080>.
 
 ## 9. Restringir quién entra
 
-El despliegue ya va con `--no-allow-unauthenticated`, así que ahora mismo
-**nadie** puede entrar. Hay que dar acceso explícito. Dos formas; la segunda es
-la cómoda para el equipo.
+Hay **dos puertas**, y conviene no confundirlas:
 
-### Opción A — Rol de invocador, persona por persona
+| Puerta | Quién la pone | Qué filtra |
+|---|---|---|
+| **Cloud Run (IAM)** | Google, antes de que la petición llegue al contenedor | Quién puede *invocar* el servicio |
+| **La aplicación** | `servidor/autenticacion.py` | Quién puede *usar* la página (login con Google + `USUARIOS_PERMITIDOS`) |
 
-Rápida y suficiente para tres o cuatro personas técnicas:
+La segunda puerta ya está puesta y es obligatoria: la página redirige a
+`/login` y no deja pasar a nadie que no haya iniciado sesión con Google y no
+esté en `USUARIOS_PERMITIDOS`. Lo que hay que decidir es cómo se configura la
+primera.
+
+### 9.1 La lista de personas autorizadas
+
+Está en la variable `USUARIOS_PERMITIDOS` de `despliegue/variables.env`:
+correos completos separados por coma, sin espacios.
+
+```
+USUARIOS_PERMITIDOS=ana@cun.edu.co,luis@cun.edu.co
+```
+
+Quien no esté en esa lista entra con Google, Google confirma quién es, y la
+página le responde *«esa cuenta no tiene acceso»*. Nunca ve la herramienta.
+
+Para cambiarla **no hace falta volver a construir la imagen**. O se vuelve a
+pasar `despliegue\desplegar.ps1`, o se edita la variable directamente:
 
 ```powershell
-gcloud run services add-iam-policy-binding fabrica-contenido-web `
+gcloud run services update fabrica-contenido-web `
   --region=<REGION> `
-  --member="user:<PERSONA>@cun.edu.co" `
-  --role="roles/run.invoker"
+  --update-env-vars="USUARIOS_PERMITIDOS=ana@cun.edu.co,luis@cun.edu.co,eva@cun.edu.co"
 ```
 
-Mejor todavía, a un grupo de Google Workspace: se gestiona desde Workspace y no
-hay que tocar Cloud cada vez que entra o sale alguien del equipo.
+Quitar a alguien de la lista **cierra su sesión en el acto**: la cookie se
+revisa contra la lista en cada petición, no solo al entrar.
 
-```powershell
-gcloud run services add-iam-policy-binding fabrica-contenido-web `
-  --region=<REGION> `
-  --member="group:<GRUPO>@cun.edu.co" `
-  --role="roles/run.invoker"
-```
+### 9.2 El cliente OAuth (una sola vez)
 
-**Tiene una pega**: desde el navegador, a secas, no funciona. El navegador no
-manda el testigo de identidad de Google, así que cada persona tendría que entrar
-por el túnel (`gcloud run services proxy ...`). Para alguien no técnico eso es
-un problema.
+1. **Pantalla de consentimiento** — <https://console.cloud.google.com/apis/credentials/consent>.
+   Elige **Interno** si el proyecto está dentro de la organización de la CUN:
+   así ni siquiera pueden intentarlo las cuentas de fuera.
 
-Ver quién tiene acceso hoy:
+2. **Credenciales** → *Crear credenciales* → *ID de cliente de OAuth* →
+   **Aplicación web**.
 
-```powershell
-gcloud run services get-iam-policy fabrica-contenido-web --region=<REGION>
-```
+3. En **URI de redireccionamiento autorizados**, letra por letra:
 
-Quitar a alguien:
-
-```powershell
-gcloud run services remove-iam-policy-binding fabrica-contenido-web `
-  --region=<REGION> `
-  --member="user:<PERSONA>@cun.edu.co" `
-  --role="roles/run.invoker"
-```
-
-### Opción B — Identity-Aware Proxy (IAP), entrada por navegador
-
-IAP se pone delante del servicio y pide iniciar sesión con la cuenta
-`@cun.edu.co` en una pantalla de Google, como cualquier otra web corporativa. Es
-lo recomendable si la web la va a usar gente del equipo de contenidos.
-
-1. Configura la pantalla de consentimiento, una sola vez, de tipo **Interna**:
-   <https://console.cloud.google.com/apis/credentials/consent> → *Interno*.
-
-2. Habilita IAP en el servicio:
-
-   ```powershell
-   gcloud beta run services update fabrica-contenido-web `
-     --region=<REGION> `
-     --iap
+   ```
+   https://<URL DEL SERVICIO>/api/sesion/callback
+   http://localhost:8080/api/sesion/callback      (solo si quieres probar en tu equipo)
    ```
 
-3. Da acceso a las personas o al grupo:
+   Si esta URI no coincide exactamente con `URL_PUBLICA` + `/api/sesion/callback`,
+   Google responde `redirect_uri_mismatch` y nadie puede entrar.
+
+4. El **ID de cliente** va en `variables.env` (`GOOGLE_OAUTH_CLIENT_ID`, no es
+   secreto). El **secreto de cliente** va a Secret Manager:
+
+   ```powershell
+   $tmp = Join-Path $env:TEMP "oauth.txt"
+   [System.IO.File]::WriteAllText($tmp, "<SECRETO_DE_CLIENTE>", (New-Object System.Text.UTF8Encoding($false)))
+   gcloud secrets create fabrica-oauth-secret --replication-policy="automatic"
+   gcloud secrets versions add fabrica-oauth-secret --data-file="$tmp"
+   Remove-Item $tmp
+   gcloud secrets add-iam-policy-binding fabrica-oauth-secret `
+     --member="serviceAccount:$SA" --role="roles/secretmanager.secretAccessor"
+   ```
+
+5. Y la semilla que firma las cookies de sesión, que tiene que ser **siempre la
+   misma** (si cambia, todo el mundo vuelve a entrar):
+
+   ```powershell
+   $semilla = python -c "import secrets; print(secrets.token_urlsafe(32))"
+   $tmp = Join-Path $env:TEMP "semilla.txt"
+   [System.IO.File]::WriteAllText($tmp, $semilla, (New-Object System.Text.UTF8Encoding($false)))
+   gcloud secrets create fabrica-sesion-secreto --replication-policy="automatic"
+   gcloud secrets versions add fabrica-sesion-secreto --data-file="$tmp"
+   Remove-Item $tmp
+   gcloud secrets add-iam-policy-binding fabrica-sesion-secreto `
+     --member="serviceAccount:$SA" --role="roles/secretmanager.secretAccessor"
+   ```
+
+`despliegue\desplegar.ps1` monta los dos secretos solo; no hay que tocar el
+comando.
+
+### 9.3 La puerta de Cloud Run: elige una
+
+El script despliega con `--no-allow-unauthenticated`. Con eso, **el navegador
+no llega siquiera a la pantalla de entrada**: Google rechaza la petición antes,
+porque el navegador no manda ningún testigo de identidad. Hay que elegir:
+
+#### Opción A — IAP delante (la más cerrada)
+
+IAP pide la cuenta `@cun.edu.co` antes de dejar pasar, y la aplicación vuelve a
+pedir login con Google. Son dos pantallas seguidas para la misma persona: más
+pesado de usar, pero nadie que no esté en el grupo de Workspace toca siquiera
+el contenedor. Recomendable si la URL tiene que estar cerrada a cal y canto.
+
+1. Habilita IAP en el servicio:
+
+   ```powershell
+   gcloud beta run services update fabrica-contenido-web --region=<REGION> --iap
+   ```
+
+2. Da acceso al grupo:
 
    ```powershell
    gcloud beta iap web add-iam-policy-binding `
-     --region=<REGION> `
-     --resource-type=cloud-run `
-     --service=fabrica-contenido-web `
-     --member="group:<GRUPO>@cun.edu.co" `
-     --role="roles/iap.httpsResourceAccessor"
+     --region=<REGION> --resource-type=cloud-run --service=fabrica-contenido-web `
+     --member="group:<GRUPO>@cun.edu.co" --role="roles/iap.httpsResourceAccessor"
    ```
 
-4. Deja que **solo IAP** pueda invocar el servicio; si no, el rol de invocador
-   directo seguiría siendo otra puerta de entrada:
+3. Deja que **solo IAP** invoque el servicio:
 
    ```powershell
    gcloud run services add-iam-policy-binding fabrica-contenido-web `
@@ -711,18 +755,53 @@ lo recomendable si la web la va a usar gente del equipo de contenidos.
      --role="roles/run.invoker"
    ```
 
-   El número del proyecto (no es el nombre, es un número largo):
+   El número del proyecto (es un número largo, no el nombre):
 
    ```powershell
    gcloud projects describe it-fab-contenido-edu-1 --format="value(projectNumber)"
    ```
 
-Con IAP, la URL del servicio se abre en el navegador y pide la cuenta de la CUN.
-Quien no esté en la lista ve un "No tienes acceso" y nunca llega a la aplicación.
+#### Opción B — La aplicación como única puerta
 
-> **Ni con IAP ni sin él se usa `--allow-unauthenticated`.** Ese valor convierte
-> la URL en pública para todo internet, y este servicio escribe en Drive y en la
-> base de producción.
+La URL queda alcanzable desde internet y lo que protege la herramienta es el
+login de la página. Una sola pantalla de entrada, que es lo que espera el
+equipo de contenidos.
+
+```powershell
+gcloud run services add-iam-policy-binding fabrica-contenido-web `
+  --region=<REGION> --member="allUsers" --role="roles/run.invoker"
+```
+
+> **Qué queda expuesto con la opción B:** cualquiera en internet puede pedir la
+> URL. Lo único que obtiene es la pantalla de entrada (`/login`), su hoja de
+> estilos y una redirección a Google; **toda** la API responde `401` sin sesión
+> válida, y la sesión exige haber pasado por Google y estar en
+> `USUARIOS_PERMITIDOS`. Nada de Drive, de la base ni del historial de corridas
+> se sirve sin eso. Aun así, es una decisión que conviene tomar a conciencia y
+> no por descuido: con `--no-allow-unauthenticated` ni siquiera hay superficie
+> que atacar.
+
+Lo que **no** vale en ninguno de los dos casos es `--allow-unauthenticated` sin
+haber comprobado antes que `GOOGLE_OAUTH_CLIENT_ID`, el secreto de cliente y
+`USUARIOS_PERMITIDOS` están puestos: si el acceso no está configurado, la
+aplicación responde `503` a todo —no deja entrar a nadie, pero tampoco protege
+nada, porque no hay nada funcionando.
+
+Ver quién tiene acceso hoy a nivel de Cloud Run:
+
+```powershell
+gcloud run services get-iam-policy fabrica-contenido-web --region=<REGION>
+```
+
+#### Opción C — Rol de invocador, persona por persona (solo técnicos)
+
+Sigue estando disponible y es lo que hay ahora mismo. Funciona bien para
+pruebas con `gcloud run services proxy`, pero desde un navegador a secas no:
+
+```powershell
+gcloud run services add-iam-policy-binding fabrica-contenido-web `
+  --region=<REGION> --member="user:<PERSONA>@cun.edu.co" --role="roles/run.invoker"
+```
 
 ---
 
@@ -851,7 +930,13 @@ consulta de arriba aunque funcionen. El de Cloud SQL sí es de proyecto.
 
 Antes de decir que está en producción:
 
-- [ ] `gcloud run services get-iam-policy` **no** contiene `allUsers`.
+- [ ] Si `gcloud run services get-iam-policy` contiene `allUsers`, fue una decisión
+      tomada a conciencia (opción B de la sección 9.3) y el login de la página funciona.
+- [ ] `USUARIOS_PERMITIDOS` tiene **solo** los correos que deben entrar, y se probó
+      que una cuenta de fuera de la lista recibe «esa cuenta no tiene acceso».
+- [ ] Los secretos `fabrica-oauth-secret` y `fabrica-sesion-secreto` existen y la cuenta
+      del servicio puede leerlos.
+- [ ] `URL_PUBLICA` + `/api/sesion/callback` está registrada en el cliente OAuth.
 - [ ] El servicio corre con `fabrica-web@...`, no con la cuenta de Compute por defecto.
 - [ ] El bucket tiene `publicAccessPrevention: enforced`.
 - [ ] `SCHEMA_POR_DEFECTO` y `LMS_SCHEMA` están en `fabrica_pruebas`.

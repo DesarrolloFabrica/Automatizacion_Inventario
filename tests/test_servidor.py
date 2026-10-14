@@ -16,6 +16,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from flujo_lib.mensajes import ErrorFlujo
+from servidor import autenticacion
 from servidor.app import crear_app
 from servidor.configuracion import Configuracion, cargar
 from servidor.corridas import Gestor, construir_lote
@@ -32,6 +33,30 @@ ENV_OK = {
     "DB_HOST": "10.0.0.5", "DB_PORT": "5432", "DB_NAME": "planner_db",
     "DB_USER": "fabrica", "DB_PASSWORD": "secreto",
 }
+
+
+# La página exige iniciar sesión, así que las pruebas de la API entran ya
+# autenticadas: se les pone la misma cookie firmada que pondría el servidor al
+# volver de Google. El flujo de entrada en sí se prueba en test_autenticacion.
+ACCESO = autenticacion.ConfiguracionAcceso(
+    client_id="cliente-de-prueba.apps.googleusercontent.com",
+    client_secret="secreto-de-prueba",
+    correos_permitidos=frozenset({"ana@cun.edu.co"}),
+    secreto_sesion="semilla-de-prueba",
+    horas_sesion=8,
+    url_publica="",
+    cookie_segura=False,
+)
+
+
+def cliente_autenticado(cfg, gestor, *, correo: str | None = "ana@cun.edu.co") -> TestClient:
+    """TestClient con la sesión ya abierta (o sin ella, si correo es None)."""
+    cliente = TestClient(crear_app(cfg, gestor, acceso=ACCESO))
+    if correo:
+        cliente.cookies.set(
+            autenticacion.COOKIE, autenticacion.crear_sesion(ACCESO, correo, "Ana Gómez")
+        )
+    return cliente
 
 
 def configuracion_de_prueba(carpeta: Path, **kw) -> Configuracion:
@@ -253,7 +278,7 @@ class TestApi(unittest.TestCase):
         self.cfg = configuracion_de_prueba(self.dir)
         self.gestor = Gestor(self.cfg, correr=lambda _t: None, automatico=False)
         self.addCleanup(self.gestor.detener)
-        self.cliente = TestClient(crear_app(self.cfg, self.gestor))
+        self.cliente = cliente_autenticado(self.cfg, self.gestor)
 
     def test_lanzar_devuelve_201_y_el_id(self):
         r = self.cliente.post("/api/corridas", json={"origen": URL_ORIGEN, "destino": URL_RAIZ,
@@ -389,7 +414,7 @@ class TestExtremoAExtremo(unittest.TestCase):
         self.cfg = configuracion_de_prueba(self.dir)
         self.gestor = Gestor(self.cfg, automatico=False)
         self.addCleanup(self.gestor.detener)
-        self.cliente = TestClient(crear_app(self.cfg, self.gestor))
+        self.cliente = cliente_autenticado(self.cfg, self.gestor)
 
     def test_una_corrida_completa_desde_la_api(self):
         creada = self.cliente.post("/api/corridas", json={

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar — Fábrica de contenido</title>
+  <link rel="stylesheet" href="estilos.css?v=20260923-3">
+</head>
+<body class="cuerpo-entrada">
+
+  <main class="entrada" id="contenido">
+
+    <div class="tarjeta entrada__tarjeta">
+
+      <h1 class="entrada__titulo">Clonación e inventario</h1>
+      <p class="entrada__sub">Fábrica de contenido · CUN</p>
+
+      <!-- El motivo del rechazo lo escribe login.js leyendo la dirección -->
+      <p class="entrada__aviso" id="aviso" role="alert" hidden></p>
+
+      <p class="entrada__explicacion">
+        Esta herramienta es de uso interno. Entra con tu cuenta institucional
+        de Google para continuar.
+      </p>
+
+      <!-- Un enlace y no un formulario: el servidor solo necesita un GET y
+           así la página funciona aunque el JavaScript no llegue a cargarse.
+           login.js le añade después el destino al que se quería ir. -->
+      <a class="boton boton--principal entrada__boton" id="boton-entrar"
+         href="/api/sesion/iniciar">Entrar con Google</a>
+
+      <p class="entrada__pie">
+        El acceso está limitado a las personas autorizadas del equipo. Si tu
+        cuenta no está en la lista, escribe a quien administra la fábrica de
+        contenido para que te la habilite.
+      </p>
+
+    </div>
+
+  </main>
+
+  <script src="login.js?v=20260923-3"></script>
+</body>
+</html>
