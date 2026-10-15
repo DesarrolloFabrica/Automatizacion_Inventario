@@ -167,6 +167,45 @@ class TestReemplazo(unittest.TestCase):
         self.assertFalse(conexion.confirmada)
         self.assertTrue(conexion.cerrada)
 
+    def test_programa_ya_cargado_borra_antes_sus_recursos_moodle(self):
+        """
+        En `fabrica` cada archivo tiene su fila en recurso_moodle (la crea un
+        trigger) y la llave foránea impide borrar el archivo antes que ella.
+        """
+
+        class CursorConRecursos(Cursor):
+            def execute(self, sql, params=()):
+                texto = " ".join(str(sql).split()).upper()
+                if texto.startswith("SELECT TO_REGCLASS"):
+                    self.sql.append((sql, params))
+                    self._filas = [("fabrica.recurso_moodle",)]
+                elif texto.startswith("DELETE FROM FABRICA.RECURSO_MOODLE"):
+                    self.sql.append((sql, params))
+                    self.recursos_borrados = self._programas(params)
+                else:
+                    super().execute(sql, params)
+
+        conexion = Conexion()
+        conexion.cursor_obj = CursorConRecursos({"PROGRAMA": 125})
+        with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
+            stats = gcp.cargar_lote([FILA], schema="fabrica", conectar=lambda: conexion)
+
+        cursor = conexion.cursor_obj
+        self.assertEqual(cursor.recursos_borrados, ("PROGRAMA",))
+        borrados = [" ".join(s.split()) for s, _ in cursor.sql if s.strip().upper().startswith("DELETE")]
+        self.assertTrue(borrados[0].startswith("DELETE FROM fabrica.recurso_moodle"))
+        self.assertTrue(borrados[1].startswith("DELETE FROM fabrica.archivo"))
+        self.assertEqual(stats["eliminados"], 125)
+        self.assertEqual(stats["insertados"], 1)
+        self.assertTrue(conexion.confirmada)
+
+    def test_sin_tabla_recurso_moodle_solo_borra_archivos(self):
+        stats, conexion = self.cargar([FILA], previos={"PROGRAMA": 120})
+        borrados = [s for s, _ in conexion.cursor_obj.sql if s.strip().upper().startswith("DELETE")]
+        self.assertEqual(len(borrados), 1)
+        self.assertIn(".archivo", borrados[0])
+        self.assertEqual(stats["eliminados"], 120)
+
     def test_simular_no_borra_ni_conecta(self):
         conectar = mock.Mock(side_effect=AssertionError("no debe conectar"))
         stats = gcp.cargar_lote([FILA], schema="fabrica_pruebas", simular=True, conectar=conectar)

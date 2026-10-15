@@ -10,7 +10,8 @@ transacción: si algo falla no se pierde nada.
 Ejemplo: si hay 500 archivos y 120 son de un programa que ahora trae 150, se
 borran esos 120 y se insertan los 150 → quedan 530.
 
-Solo se borran filas de `archivo`. Las dimensiones (escuela, programa, materia,
+Solo se borran filas de `archivo` (y antes sus `recurso_moodle`, que el trigger
+vuelve a crear al insertar). Las dimensiones (escuela, programa, materia,
 gránulo) se conservan y se reutilizan, así los identificadores se mantienen
 estables entre cargas.
 
@@ -287,7 +288,28 @@ def _borrar_programas(cur, schema: str, programas: list[str]) -> int:
     Se borra por programa a secas y no por programa+cliente a propósito: si un
     programa cambió de cliente, filtrar por cliente dejaría vivas las filas
     viejas y volveríamos a tener duplicados, que es justo lo que se evita.
+
+    Antes se borran sus filas de `recurso_moodle`: su llave foránea impide
+    borrar un archivo que aún las tenga (ForeignKeyViolation al recargar un
+    programa ya cargado). No se pierde nada propio: esas filas las crea el
+    trigger `trg_recurso_moodle` a partir del archivo, y vuelve a crearlas al
+    insertar los archivos nuevos. Solo se toca la base; Drive no.
     """
+    cur.execute("SELECT to_regclass(%s)", (f"{schema}.recurso_moodle",))
+    existe_recurso = any(fila and fila[0] for fila in cur.fetchall() or [])
+    if existe_recurso:
+        cur.execute(
+            f"""
+            DELETE FROM {schema}.recurso_moodle r
+            USING {schema}.archivo a, {schema}.granulo g, {schema}.materia m, {schema}.programa p
+            WHERE r.archivo_id = a.id
+              AND a.granulo_id = g.id
+              AND g.materia_id = m.id
+              AND m.programa_id = p.id
+              AND p.nombre = ANY(%s)
+            """,
+            (programas,),
+        )
     cur.execute(
         f"""
         DELETE FROM {schema}.archivo a
