@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flujo_lib import certificados, drive
+from flujo_lib import archivo_unico, certificados, drive
 from flujo_lib.mensajes import ErrorFlujo, traducir_excepcion
 from flujo_lib.prevalidacion import cargar_env
 from servidor import autenticacion, configuracion, registro
@@ -57,6 +57,14 @@ class PeticionLote(BaseModel):
     origen: str = ""
     destino: str = ""
     crear_destino: bool = True
+
+
+class PeticionArchivoUnico(BaseModel):
+    origen: str
+    nombre: str
+    destino: str
+    nombre_destino: str = ""
+    simular: bool = True
 
 
 class PeticionCorrida(BaseModel):
@@ -132,7 +140,7 @@ def crear_app(
         """Evita mezclar HTML nuevo con JS o CSS guardados por el navegador."""
         respuesta = await continuar(peticion)
         if peticion.url.path in {
-            "/", "/index.html", "/app.js", "/estilos.css", "/login", "/login.html", "/login.js",
+            "/", "/index.html", "/app.js", "/archivo-unico.js", "/estilos.css", "/login", "/login.html", "/login.js",
         }:
             respuesta.headers["Cache-Control"] = "no-store, max-age=0"
         return respuesta
@@ -247,6 +255,26 @@ def crear_app(
         return {"correo": sesion["correo"], "nombre": sesion.get("nombre", "")}
 
     # ----- API -------------------------------------------------------------
+    @app.post("/api/archivo-unico")
+    def reemplazar_archivo(peticion: PeticionArchivoUnico):
+        try:
+            # Comparte el cerrojo de admisión con las cargas de carpetas.
+            with gestor._lock:
+                if any(not trabajo.terminado for trabajo in gestor._trabajos.values()):
+                    raise ErrorFlujo("Hay una corrida en marcha.", "Espera a que termine antes de reemplazar un archivo.", paso="archivo_unico")
+                creds = configuracion.cargar_credenciales(cfg)
+                return archivo_unico.reemplazar(
+                    drive.construir_servicio(creds), origen=peticion.origen,
+                    destino=peticion.destino, nombre=peticion.nombre,
+                    nombre_destino=peticion.nombre_destino, schema=cfg.schema,
+                    simular=peticion.simular or cfg.simular_forzado,
+                )
+        except ErrorFlujo as e:
+            return _error(409 if "en marcha" in e.motivo else 400, e)
+        except Exception as e:
+            logger.exception("Falló el reemplazo de archivo único")
+            return _error(400, traducir_excepcion(e, paso="archivo_unico"))
+
     @app.get("/api/salud")
     def salud() -> dict:
         """Contra qué cuenta y qué esquema se está trabajando."""

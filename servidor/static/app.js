@@ -65,6 +65,7 @@
 
   function $(id) { return document.getElementById(id); }
 
+
   /* ----------------------------------------------------------------------
      Capa de API
      Dos implementaciones con la misma forma: la real y la de demostración.
@@ -305,6 +306,12 @@
   function mostrarVista(cual) {
     $('vista-formulario').hidden = (cual !== 'formulario');
     $('vista-avance').hidden = (cual !== 'avance');
+    $('vista-selector').hidden = (cual !== 'selector');
+    $('vista-archivo-unico').hidden = (cual !== 'archivo-unico');
+    $('navegacion-modulos').hidden = (cual === 'selector');
+    document.querySelectorAll('[data-modulo]').forEach(function (boton) {
+      boton.setAttribute('aria-pressed', String(boton.dataset.modulo === (cual === 'avance' ? 'completa' : cual === 'formulario' ? 'completa' : 'unico')));
+    });
     window.scrollTo(0, 0);
   }
 
@@ -420,6 +427,12 @@
 
   function manejarEnvio(evento) {
     evento.preventDefault();
+    if (MODO_DEMO) {
+      $('error-envio').textContent = 'No se ejecutó ninguna carga. Esta página es una demostración visual y no se conecta a Drive. Abre la aplicación real e inicia sesión para cargar tus carpetas.';
+      $('error-envio').hidden = false;
+      $('error-envio').focus();
+      return;
+    }
     var cajaEnvio = $('error-envio');
     cajaEnvio.hidden = true;
 
@@ -1003,6 +1016,14 @@
      ---------------------------------------------------------------------- */
 
   function iniciar() {
+    window.ArchivoUnico.iniciar({ pedirJson: pedirJson, demo: MODO_DEMO });
+    document.querySelectorAll('[data-modulo]').forEach(function (boton) {
+      boton.addEventListener('click', function () {
+        mostrarVista(boton.dataset.modulo === 'unico' ? 'archivo-unico' : (idCorrida ? 'avance' : 'formulario'));
+      });
+    });
+    $('boton-selector').addEventListener('click', function () { mostrarVista('selector'); });
+    mostrarVista('selector');
     $('formulario').addEventListener('submit', manejarEnvio);
 
     var rutas = recuperarRutas();
@@ -1030,6 +1051,8 @@
     vigilarDesplazamiento();
 
     if (MODO_DEMO) {
+      $('aviso-demostracion').hidden = false;
+      $('boton-ejecutar').textContent = 'Carga deshabilitada en la demostración';
       $('pie-modo').textContent = 'Modo demostración: los datos son inventados y no se toca Drive ' +
         'ni la base de datos. Quita ?demo=1 de la dirección para usarlo de verdad.';
     }

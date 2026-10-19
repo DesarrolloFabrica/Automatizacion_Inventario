@@ -148,10 +148,22 @@ class TestCargaLimpia(unittest.TestCase):
         with self.assertRaises(ErrorFlujo):
             gcp.cargar_lote([{**FILA, "escuela_nombre": ""}], schema="fabrica1", simular=True)
 
-    def test_el_esquema_anterior_sigue_igual(self):
-        self.assertFalse(gcp.es_esquema_limpio("fabrica"))
+    def test_fabrica_oficial_usa_carga_normalizada(self):
+        self.assertTrue(gcp.es_esquema_limpio("fabrica"))
         self.assertFalse(gcp.es_esquema_limpio("fabrica_pruebas"))
         self.assertTrue(gcp.es_esquema_limpio("fabrica1"))
+
+    def test_fabrica_oficial_no_borra_y_conserva_el_vinculo_de_origen(self):
+        cursor = CursorLimpio()
+        conexion = Conexion(cursor)
+        stats = gcp.cargar_lote([FILA], schema="fabrica", conectar=lambda: conexion, reemplazar=True)
+        self.assertEqual(stats["insertados"], 1)
+        self.assertEqual(stats["eliminados"], 0)
+        self.assertFalse(any("DELETE FROM" in s for s, _ in cursor.sql))
+        inserciones = [(s, p) for s, p in cursor.sql if s.startswith("INSERT INTO fabrica.archivo ")]
+        self.assertEqual(len(inserciones), 1)
+        self.assertIn("origen_id, fecha_origen", inserciones[0][0])
+        self.assertEqual(inserciones[0][1][-2:], (FILA["origen_id"], FILA["fecha_origen"]))
 
 
 class TestProblemasFilas(unittest.TestCase):

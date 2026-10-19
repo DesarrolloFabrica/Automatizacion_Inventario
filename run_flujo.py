@@ -63,10 +63,8 @@ from flujo_lib.progreso import Reporte  # noqa: E402
 from flujo_lib.verificacion import verificar_lote  # noqa: E402
 
 SCHEMA_PRODUCCION = "fabrica"
-# Recarga desde cero (2026-10-02): todo va a fabrica1, la base nueva y limpia
-# (formato real, IDs de secuencia, ID y fecha de subida del archivo de origen).
-# fabrica y fabrica_pruebas siguen disponibles a mano con --schema.
-SCHEMA_DEFECTO = "fabrica1"
+# Promoción del 2026-10-19: fabrica es el esquema oficial normalizado.
+SCHEMA_DEFECTO = "fabrica"
 PASOS_REHACER = PASOS + ("todo",)
 NOTA_OMITIDO = "No se ejecutó porque falló el paso anterior"
 NOTA_CANCELADO = "No se ejecutó: la corrida se canceló"
@@ -106,8 +104,8 @@ def construir_parser() -> argparse.ArgumentParser:
         "--schema",
         default=SCHEMA_DEFECTO,
         help=(
-            f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, la base nueva). "
-            f"El esquema anterior hay que indicarlo a mano: --schema {SCHEMA_PRODUCCION}."
+            f"Esquema de Cloud SQL donde se cargará (default: {SCHEMA_DEFECTO}, oficial normalizado). "
+            "Para el esquema temporal usa --schema fabrica1."
         ),
     )
     parser.add_argument(
@@ -636,7 +634,7 @@ def ejecutar_corrida(
             estado.cerrar_corrida("fallido_prevalidacion")
             ruta_xlsx = exportar_estado(estado)
             logging.error("El flujo no arrancó. Corrige lo anterior y vuelve a ejecutar.")
-            if not args.simular and ruta_xlsx is not None and res.creds is not None:
+            if not args.simular and not getattr(args, "sin_correo", False) and ruta_xlsx is not None and res.creds is not None:
                 try:
                     primero = res.errores()[0]
                     mensaje = construir_mensaje(

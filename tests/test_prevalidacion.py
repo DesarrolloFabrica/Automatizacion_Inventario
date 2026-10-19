@@ -240,7 +240,8 @@ class TestTodoOk(BasePrevalidacion):
         res = self.prevalidar()
         self.assertTrue(res.ok, [h.texto() for h in res.errores()])
         self.assertEqual(res.errores(), [])
-        self.assertEqual(res.avisos(), [])
+        self.assertEqual(len(res.avisos()), 2)
+        self.assertTrue(all(h.area == "cliente" and "ESCUELA_" in h.mensaje for h in res.avisos()))
         self.assertEqual(res.cuenta, "fabrica.contenidos@cun.edu.co")
         self.assertIs(res.creds, CREDS)
         self.assertIs(res.svc, self.fake)
@@ -250,10 +251,9 @@ class TestTodoOk(BasePrevalidacion):
         self.assertEqual(res.carpetas[RAIZ_B]["name"], "LMS_Carga 2")
         # un ok por área (drive: uno por lote) y en el orden del contrato
         self.assertEqual(
-            [h.area for h in res.hallazgos],
+            [h.area for h in res.hallazgos if h.nivel == "ok"],
             ["excel", "token", "drive", "drive", "cliente", "cliente", "correo", "db"],
         )
-        self.assertTrue(all(h.nivel == "ok" for h in res.hallazgos))
 
     def test_mensajes_ok(self):
         res = self.prevalidar()
@@ -485,7 +485,7 @@ class TestCorreo(BasePrevalidacion):
         aviso = self.unico(res, "correo", "aviso")
         self.assertEqual(aviso.mensaje, "No hay destinatarios de correo configurados.")
         self.assertEqual(self.por_area(res, "correo", "error"), [])
-        self.assertEqual(len(res.avisos()), 1)
+        self.assertEqual(len(self.por_area(res, "correo", "aviso")), 1)
 
     def test_correo_sin_arroba_es_error(self):
         res = self.prevalidar(env={**ENV_OK, "CORREOS_AVISO": "ana@cun.edu.co, luis.cun.edu.co"})
@@ -562,8 +562,8 @@ class TestBaseDatos(BasePrevalidacion):
         self.assertEqual(len(self.por_area(res, "db", "ok")), 1)
 
     def test_esquema_anterior_no_pide_columnas_de_origen(self):
-        db = BaseFalsa(esquemas=("fabrica",), columnas_origen=False)
-        res = self.prevalidar(conectar_db=db)
+        db = BaseFalsa(esquemas=("fabrica_pruebas",), columnas_origen=False)
+        res = self.prevalidar(schema="fabrica_pruebas", conectar_db=db)
         self.assertEqual(self.por_area(res, "db", "error"), [])
 
     def test_fabrica1_avisa_si_el_lote_no_tiene_escuela(self):
@@ -598,9 +598,9 @@ class TestBaseDatos(BasePrevalidacion):
         valida.lotes.append(replace(base, origen_id="1TenYdfOM8WQzYOgPTd-SY0osvJvTYefn"))
         _revisar_escuela(valida, "fabrica1")
         self.assertEqual(valida.hallazgos, [])
-        anterior = ResultadoPrevalidacion()  # fabrica sigue como antes
+        anterior = ResultadoPrevalidacion()  # solo fabrica_pruebas conserva la carga antigua
         anterior.lotes.append(replace(base, origen_id="1plXOgDKXBTxIKn5EV11c-av0OT7qKmGt"))
-        _revisar_escuela(anterior, "fabrica")
+        _revisar_escuela(anterior, "fabrica_pruebas")
         self.assertEqual(anterior.hallazgos, [])
 
     def test_esquema_ausente_con_simular_es_aviso(self):

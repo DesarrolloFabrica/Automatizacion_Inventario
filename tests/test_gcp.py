@@ -169,7 +169,7 @@ class TestReemplazo(unittest.TestCase):
 
     def test_programa_ya_cargado_borra_antes_sus_recursos_moodle(self):
         """
-        En `fabrica` cada archivo tiene su fila en recurso_moodle (la crea un
+        En `fabrica_pruebas` cada archivo tiene su fila en recurso_moodle (la crea un
         trigger) y la llave foránea impide borrar el archivo antes que ella.
         """
 
@@ -178,8 +178,8 @@ class TestReemplazo(unittest.TestCase):
                 texto = " ".join(str(sql).split()).upper()
                 if texto.startswith("SELECT TO_REGCLASS"):
                     self.sql.append((sql, params))
-                    self._filas = [("fabrica.recurso_moodle",)]
-                elif texto.startswith("DELETE FROM FABRICA.RECURSO_MOODLE"):
+                    self._filas = [("fabrica_pruebas.recurso_moodle",)]
+                elif texto.startswith("DELETE FROM FABRICA_PRUEBAS.RECURSO_MOODLE"):
                     self.sql.append((sql, params))
                     self.recursos_borrados = self._programas(params)
                 else:
@@ -188,13 +188,13 @@ class TestReemplazo(unittest.TestCase):
         conexion = Conexion()
         conexion.cursor_obj = CursorConRecursos({"PROGRAMA": 125})
         with mock.patch.object(gcp, "_heredados", return_value=(heredado(), None)):
-            stats = gcp.cargar_lote([FILA], schema="fabrica", conectar=lambda: conexion)
+            stats = gcp.cargar_lote([FILA], schema="fabrica_pruebas", conectar=lambda: conexion)
 
         cursor = conexion.cursor_obj
         self.assertEqual(cursor.recursos_borrados, ("PROGRAMA",))
         borrados = [" ".join(s.split()) for s, _ in cursor.sql if s.strip().upper().startswith("DELETE")]
-        self.assertTrue(borrados[0].startswith("DELETE FROM fabrica.recurso_moodle"))
-        self.assertTrue(borrados[1].startswith("DELETE FROM fabrica.archivo"))
+        self.assertTrue(borrados[0].startswith("DELETE FROM fabrica_pruebas.recurso_moodle"))
+        self.assertTrue(borrados[1].startswith("DELETE FROM fabrica_pruebas.archivo"))
         self.assertEqual(stats["eliminados"], 125)
         self.assertEqual(stats["insertados"], 1)
         self.assertTrue(conexion.confirmada)

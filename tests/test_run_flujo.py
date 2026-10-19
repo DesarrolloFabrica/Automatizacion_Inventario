@@ -228,7 +228,7 @@ class TestCorridaFeliz(BaseRunFlujo):
             datos["corridas"][0]["argumentos"],
             {
                 "excel": str(excel.resolve()),
-                "schema": "fabrica1",
+                "schema": "fabrica",
                 "simular": False,
                 "forzar_carga": False,
                 "solo_prevalidar": False,
@@ -480,7 +480,7 @@ class TestParser(unittest.TestCase):
     def test_defaults(self):
         args = run_flujo.construir_parser().parse_args([])
         self.assertIsNone(args.excel)
-        self.assertEqual(args.schema, "fabrica1")  # la base nueva y limpia, no fabrica
+        self.assertEqual(args.schema, "fabrica")  # oficial normalizado
         self.assertFalse(args.simular)
         self.assertFalse(args.forzar_carga)
         self.assertFalse(args.solo_prevalidar)
@@ -520,7 +520,7 @@ class TestParser(unittest.TestCase):
         datos = run_flujo.argumentos_corrida(args, Path("C:/x/RUTAS.xlsx"))
         self.assertEqual(datos["rehacer"], list(run_flujo.PASOS))
         self.assertTrue(datos["forzar_carga"])
-        self.assertEqual(datos["schema"], "fabrica1")
+        self.assertEqual(datos["schema"], "fabrica")
 
 
 # ---------------------------------------------------------------------------

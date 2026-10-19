@@ -4,6 +4,10 @@ Proyecto de automatización para la fábrica de contenido (CUN).
 Prepara material en Google Drive, ejecuta la clonación con control de calidad
 y registra el resultado en Cloud SQL (`planner_db`).
 
+Desde el **19 de octubre de 2026**, `fabrica` es el esquema oficial normalizado.
+Los datos de `fabrica1` ya fueron promovidos y las próximas cargas usan `fabrica`.
+Respaldo, referencias conservadas y validaciones: [MIGRACION_FABRICA.md](MIGRACION_FABRICA.md).
+
 El repositorio no incluye secretos. La configuración OAuth y el archivo `.env`
 se definen en el entorno local de ejecución.
 
@@ -53,7 +57,7 @@ Todo sale del Excel; no hay parámetros por lote. El comando ejecuta el flujo co
 | Opción | Descripción |
 |---|---|
 | `--excel RUTA` | Ruta a `RUTAS.xlsx` (también variable `RUTAS_XLSX` o `RUTAS.xlsx` en la raíz). |
-| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica1`, la base nueva y limpia (ver «Recarga limpia en fabrica1»). Los esquemas anteriores hay que pedirlos a mano: `--schema fabrica_pruebas` o `--schema fabrica`. El run único no lee `LMS_SCHEMA`. |
+| `--schema NOMBRE` | Esquema de Cloud SQL. Por defecto `fabrica`, oficial normalizado. Para el temporal usa `--schema fabrica1`; para el flujo antiguo, `--schema fabrica_pruebas`. El run único no lee `LMS_SCHEMA`. |
 | `--simular` | Ejecuta el flujo sin escribir en la base ni enviar correo. |
 | `--forzar-carga` | Permite cargar lotes con diferencias de verificación. Por defecto apagado. |
 | `--solo-prevalidar` | Ejecuta solo la prevalidación y termina. |
@@ -70,11 +74,11 @@ Salidas en `corridas/` (no versionado):
   y columnas "Qué pasó" / "Qué hacer" (se adjuntará al correo final).
 - `corridas/logs/<id_corrida>_<excel>.log`: log de cada corrida con el detalle técnico.
 
-### Recarga limpia en fabrica1
+### Recarga limpia y promoción a fabrica
 
-`fabrica` quedó con datos mal cargados: extensiones tomadas del nombre (decía
-`.png` y era PDF) y nombres sin punto (`G1_imagenpng`). Por eso todo se vuelve a
-clonar a una carpeta nueva y se carga en `fabrica1`, con estas reglas:
+La normalización se preparó en `fabrica1` para corregir extensiones tomadas del
+nombre y nombres sin punto. El 19 de octubre de 2026 sus datos reemplazaron los
+anteriores de `fabrica`. Ambos esquemas usan ahora estas reglas:
 
 - **Formato real**: la extensión sale del tipo del archivo (mimeType), nunca del nombre.
 - **Nombre normalizado** (`flujo_lib/nombres.nombre_final`): base limpia + extensión
@@ -103,8 +107,8 @@ Antes de la primera carga hay que crear las dos columnas, una sola vez:
 psql "host=127.0.0.1 port=5432 dbname=planner_db user=planner_user" -f LMS_Fabrica/migraciones/fabrica1_001_origen_archivo.sql
 ```
 
-La prevalidación avisa si faltan. Con `--schema fabrica` o `--schema fabrica_pruebas`
-la carga funciona como antes (reemplazo por programa, sin columnas de origen).
+La prevalidación avisa si faltan. `fabrica` ya tiene estas columnas después de la
+promoción. Solo `--schema fabrica_pruebas` usa el reemplazo por programa anterior.
 
 El alta del cliente `JARVEY` en `fabrica1.cliente` va en su propia migración (la
 carga lo crearía sola, pero así existe antes de la primera corrida):
@@ -355,8 +359,7 @@ LMS_SCHEMA=fabrica_pruebas
 ```
 
 `LMS_SCHEMA` solo lo usan los scripts de `LMS_Fabrica`. El run único carga al
-esquema de `--schema`. Por defecto es `fabrica1`, la base nueva; `fabrica`
-(producción anterior) solo se toca si se pide a mano con `--schema fabrica`.
+esquema de `--schema`. Por defecto es `fabrica`, el esquema oficial normalizado.
 
 ### Token único (run único)
 

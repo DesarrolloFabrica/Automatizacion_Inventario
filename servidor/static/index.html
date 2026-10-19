@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Clonación e inventario — Fábrica de contenido</title>
-  <link rel="stylesheet" href="estilos.css?v=20260923-3">
+  <link rel="stylesheet" href="estilos.css?v=20261019-1">
 </head>
 <body>
 
@@ -28,12 +28,82 @@
   </header>
 
   <main id="contenido" class="contenido">
+    <aside id="aviso-demostracion" class="aviso-demostracion" role="status" hidden>
+      <strong>DEMOSTRACIÓN VISUAL · NO CARGA ARCHIVOS</strong>
+      <p>Esta página no se conecta a tus carpetas de Drive. No crea archivos ni carpetas y no modifica la base de datos. Los resultados de ejemplo son ficticios.</p>
+      <p>Para realizar una carga necesitas abrir la aplicación real e iniciar sesión con Google.</p>
+    </aside>
+
+    <section id="vista-selector" class="vista" aria-labelledby="titulo-selector">
+      <div class="tarjeta">
+        <h2 id="titulo-selector" class="tarjeta__titulo">¿Qué vas a cargar?</h2>
+        <p>Selecciona el módulo que necesitas.</p>
+        <div class="selector-modulos">
+          <button class="modulo-opcion" type="button" data-modulo="unico">
+            <strong>Un solo archivo</strong>
+            <span>Reemplaza un archivo corregido conservando su enlace en destino.</span>
+          </button>
+          <button class="modulo-opcion" type="button" data-modulo="completa">
+            <strong>Carga completa</strong>
+            <span>Clona y procesa carpetas con todos sus archivos.</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <nav id="navegacion-modulos" class="navegacion-modulos" aria-label="Cambiar módulo" hidden>
+      <button class="boton boton--secundario" type="button" data-modulo="unico">Archivo único</button>
+      <button class="boton boton--secundario" type="button" data-modulo="completa">Carga completa</button>
+      <button class="boton boton--enlace" id="boton-selector" type="button">Volver al selector</button>
+    </nav>
+
+    <section id="vista-archivo-unico" class="vista" aria-labelledby="titulo-archivo-unico" hidden>
+      <div class="tarjeta">
+        <h2 id="titulo-archivo-unico" class="tarjeta__titulo">Reemplazar un solo archivo</h2>
+        <p>El contenido corregido se toma del <strong>origen</strong> y sustituye el contenido del archivo en <strong>destino</strong>, conservando su enlace.</p>
+        <form id="formulario-archivo-unico">
+          <fieldset class="unico-bloque unico-bloque--origen">
+            <legend>1. Origen · archivo corregido</legend>
+            <p class="unico-bloque__ayuda">Aquí está la versión correcta que quieres migrar. Este archivo solo se lee.</p>
+          <div class="campo">
+            <label class="campo__etiqueta" for="unico-origen">Carpeta de origen</label>
+            <input class="campo__entrada" id="unico-origen" required type="text" placeholder="Enlace o ID de la carpeta con la versión corregida">
+          </div>
+          <div class="campo">
+            <label class="campo__etiqueta" for="unico-nombre">Nombre completo del archivo, incluida la extensión</label>
+            <p class="campo__nota">soyunarchivo.pdf, soyunarchivo.mp3 y soyunarchivo.mp4 son archivos diferentes. Escribe el nombre exacto.</p>
+            <input class="campo__entrada" id="unico-nombre" required type="text" placeholder="soyunarchivo.mp3">
+          </div>
+          </fieldset>
+          <fieldset class="unico-bloque unico-bloque--destino">
+            <legend>2. Destino · archivo que se reemplazará</legend>
+            <p class="unico-bloque__ayuda">Aquí está la copia ya migrada cuyo contenido quedó mal. Solo se reemplazará ese archivo; mantendrá su nombre y enlace.</p>
+          <div class="campo">
+            <label class="campo__etiqueta" for="unico-destino">Carpeta de destino</label>
+            <input class="campo__entrada" id="unico-destino" required type="text" placeholder="Carpeta que contiene el archivo ya migrado">
+          </div>
+          <div class="campo">
+            <label class="campo__etiqueta" for="unico-nombre-destino">Nombre existente en destino (opcional)</label>
+            <p class="campo__nota">Déjalo vacío si tiene el mismo nombre. Si fue normalizado, escribe el nombre exacto en destino, también con extensión. No renombra el archivo.</p>
+            <input class="campo__entrada" id="unico-nombre-destino" type="text" placeholder="Se usa el mismo nombre del origen">
+          </div>
+          </fieldset>
+          <div class="unico-acciones">
+            <p class="campo__nota">Puedes comprobar primero que ambos archivos se encuentran antes de reemplazar el contenido.</p>
+          <button class="boton boton--secundario" type="submit" value="simular">Validar sin modificar</button>
+          <button class="boton boton--principal" type="submit" value="reemplazar">Reemplazar este archivo</button>
+          </div>
+          <p id="unico-resultado" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+
+    </section>
 
     <!-- ================= PANTALLA 1: lanzar una corrida ================= -->
-    <section id="vista-formulario" class="vista" aria-labelledby="titulo-formulario">
+    <section id="vista-formulario" class="vista" aria-labelledby="titulo-formulario" hidden>
 
       <div class="tarjeta">
-        <h2 id="titulo-formulario" class="tarjeta__titulo">Lanzar una corrida</h2>
+        <h2 id="titulo-formulario" class="tarjeta__titulo">Lanzar una carga completa</h2>
 
         <form id="formulario" novalidate>
 
@@ -192,6 +262,7 @@
     <span id="pie-modo"></span>
   </footer>
 
-  <script src="app.js?v=20260923-3"></script>
+  <script src="archivo-unico.js?v=20261019-1"></script>
+  <script src="app.js?v=20261019-1"></script>
 </body>
 </html>

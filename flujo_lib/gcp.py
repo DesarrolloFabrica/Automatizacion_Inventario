@@ -1,7 +1,7 @@
 """
 Escaneo del clon y carga transaccional de un lote en Cloud SQL.
 
-Regla de carga: **reemplazo por programa**. El material se corrige y se vuelve
+Solo en fabrica_pruebas se conserva el **reemplazo por programa**. El material se corrige y se vuelve
 a clonar, así que la base debe quedar igual a Drive y nunca con dos versiones
 del mismo programa. Antes de insertar se borran todas las filas de `archivo`
 de los programas del lote y se cargan las actuales, todo en la misma
@@ -15,8 +15,8 @@ vuelve a crear al insertar). Las dimensiones (escuela, programa, materia,
 gránulo) se conservan y se reutilizan, así los identificadores se mantienen
 estables entre cargas.
 
-ESQUEMA LIMPIO (fabrica1, recarga desde cero, 2026-10-02)
-Todo esquema que no sea `fabrica` ni `fabrica_pruebas` se trata como limpio:
+ESQUEMA LIMPIO (fabrica1 desde 2026-10-02; fabrica oficial desde 2026-10-19)
+Todo esquema que no sea `fabrica_pruebas` se trata como limpio:
   - No hay reemplazo por programa: nada se borra. Un archivo cuyo ID de origen
     ya está cargado se omite (no se duplica).
   - Cada fila lleva `origen_id` (ID del archivo en el Drive ORIGEN) y
@@ -38,7 +38,8 @@ from .mensajes import ErrorFlujo
 
 _SCHEMA_RE = re.compile(r"[a-z_][a-z0-9_]*")
 # Esquemas con datos de antes de la recarga: se cargan como siempre.
-ESQUEMAS_LEGADOS = frozenset({"fabrica", "fabrica_pruebas"})
+# fabrica adopta la carga normalizada al promover fabrica1 el 2026-10-19.
+ESQUEMAS_LEGADOS = frozenset({"fabrica_pruebas"})
 # Fecha de Drive que se guarda como fecha_origen: cuándo se subió (creó) el
 # archivo en el Drive origen. La lista de Drive muestra la de modificación
 # (modifiedTime); si se prefiere esa, basta con cambiar este valor.
@@ -89,7 +90,7 @@ def escuela_oficial(nombre: str) -> str:
 
 
 def es_esquema_limpio(schema: str) -> bool:
-    """True para la base nueva (fabrica1): sin reemplazo, con IDs de secuencia y columnas de origen."""
+    """Carga normalizada: sin reemplazo, con secuencias y columnas de origen."""
     return schema not in ESQUEMAS_LEGADOS
 
 
@@ -353,7 +354,7 @@ def conectar_desde_env(env=os.environ):
 def cargar_lote(
     filas: list[dict],
     *,
-    schema: str = "fabrica1",
+    schema: str = "fabrica",
     simular: bool = False,
     reemplazar: bool = True,
     conectar=conectar_desde_env,

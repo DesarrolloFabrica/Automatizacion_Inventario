@@ -153,7 +153,7 @@ class TestPrevalidacionCliente(BasePrevalidacion):
         return self.excel([["etiqueta", "origen", "destino"], ["Bogotá", _url(ORIGEN_A), _url(RAIZ_A)]])
 
     def test_sin_cliente_en_el_excel_se_detecta_de_drive(self):
-        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DERECHO")
+        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DE_INGENIERIA")
         res = self.prevalidar(self.excel_sin_cliente())
 
         self.assertTrue(res.ok, [h.mensaje for h in res.errores()])
@@ -161,7 +161,7 @@ class TestPrevalidacionCliente(BasePrevalidacion):
         self.assertEqual(lote.clasificacion, "PRODUCTO")
         self.assertEqual(lote.cliente_gcp, "PRODUCTO")
         self.assertEqual(lote.raiz_gcp, "LMS_Carga")
-        self.assertEqual(lote.escuela_gcp, "ESCUELA_DERECHO")
+        self.assertEqual(lote.escuela_gcp, "ESCUELA_DE_INGENIERIA")
         mensaje = self.unico(res, "cliente", "ok").mensaje
         self.assertIn("detectado", mensaje)
         self.assertIn("PRODUCTO", mensaje)
@@ -174,7 +174,7 @@ class TestPrevalidacionCliente(BasePrevalidacion):
         self.assertIn("columna cliente", err.accion)
 
     def test_el_excel_manda_y_avisa_cuando_drive_dice_otra_cosa(self):
-        self.colgar("PRODUCTO_FINAL", "Q2", "TANIA", "ESCUELA_DERECHO")
+        self.colgar("PRODUCTO_FINAL", "Q2", "TANIA", "ESCUELA_DE_INGENIERIA")
         excel = self.excel([CABECERA, ["PRODUCTO", "Bogotá", _url(ORIGEN_A), _url(RAIZ_A)]])
         res = self.prevalidar(excel)
 
@@ -186,13 +186,13 @@ class TestPrevalidacionCliente(BasePrevalidacion):
         self.assertIn("Se usará PRODUCTO", aviso.mensaje)
 
     def test_el_excel_y_drive_coinciden(self):
-        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DERECHO")
+        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DE_INGENIERIA")
         excel = self.excel([CABECERA, ["PRODUCTO", "Bogotá", _url(ORIGEN_A), _url(RAIZ_A)]])
         res = self.prevalidar(excel)
 
         self.assertEqual(self.por_area(res, "cliente", "aviso"), [])
         self.assertIn("coincide con Drive", self.unico(res, "cliente", "ok").mensaje)
-        self.assertEqual(res.lotes[0].escuela_gcp, "ESCUELA_DERECHO")
+        self.assertEqual(res.lotes[0].escuela_gcp, "ESCUELA_DE_INGENIERIA")
 
     def test_con_cliente_en_el_excel_un_fallo_de_drive_solo_avisa(self):
         excel = self.excel([CABECERA, ["PRODUCTO", "Bogotá", _url(ORIGEN_A), _url(RAIZ_A)]])
@@ -213,7 +213,7 @@ class TestPrevalidacionCliente(BasePrevalidacion):
         self.assertTrue(self.por_area(res, "cliente", "error"))
 
     def test_el_mismo_origen_en_dos_lotes_se_busca_una_sola_vez(self):
-        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DERECHO")
+        self.colgar("PRODUCTO_FINAL", "Q2", "PRODUCTO", "ESCUELA_DE_INGENIERIA")
         excel = self.excel(
             [
                 ["etiqueta", "origen", "destino"],

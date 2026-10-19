@@ -368,9 +368,9 @@ class TestApi(unittest.TestCase):
         self.assertEqual(inicio.status_code, 200)
         self.assertIn("text/html", inicio.headers["content-type"])
         self.assertEqual(inicio.headers["cache-control"], "no-store, max-age=0")
-        self.assertIn("app.js?v=20260923-3", inicio.text)
-        self.assertIn("estilos.css?v=20260923-3", inicio.text)
-        for archivo in ("estilos.css", "app.js"):
+        self.assertIn("app.js?v=20261019-1", inicio.text)
+        self.assertIn("estilos.css?v=20261019-1", inicio.text)
+        for archivo in ("estilos.css", "app.js", "archivo-unico.js"):
             respuesta = self.cliente.get(f"/{archivo}")
             self.assertEqual(respuesta.status_code, 200, archivo)
             self.assertEqual(respuesta.headers["cache-control"], "no-store, max-age=0")
