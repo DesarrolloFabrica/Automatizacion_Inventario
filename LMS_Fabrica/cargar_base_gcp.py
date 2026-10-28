@@ -22,7 +22,6 @@ from dotenv import load_dotenv
 
 from generar_base_lms import (
     ENV_PATH,
-    EXTENSION_MAP,
     SCHEMA,
     extraer_id_archivo,
     normalizar_extension,
@@ -52,17 +51,15 @@ def next_id(cur, table: str) -> int:
 
 
 def resolver_extension_id(cur, tipo: str, cache: dict) -> int:
-    """Misma regla que IdResolver: mapa fijo → lookup → create (sin duplicar formato)."""
+    """Busca la extensión real del esquema y la crea si no existe."""
     # Sin extensión se guarda vacía (extension.tipo = ''), como los ya cargados;
     # "sin_extension" no cabe en la columna (varchar(10)).
     tipo_norm = normalizar_extension(tipo)
     cache_key = ("extension", "tipo", tipo_norm)
     if cache_key in cache:
         return cache[cache_key]
-    # Los IDs fijos son los de fabrica; en un esquema limpio no existen.
-    if tipo_norm in EXTENSION_MAP and not USAR_SECUENCIAS:
-        cache[cache_key] = EXTENSION_MAP[tipo_norm]
-        return cache[cache_key]
+    # No se usan IDs históricos: distintos esquemas o una
+    # restauración de la base pueden asignar otro id al mismo tipo.
     cur.execute(
         f"SELECT id FROM {SCHEMA}.extension WHERE tipo = %s OR UPPER(tipo) = %s",
         (tipo_norm, tipo_norm.upper()),

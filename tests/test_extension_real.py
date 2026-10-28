@@ -105,6 +105,27 @@ class SinExtensionTest(unittest.TestCase):
         self.assertEqual(carga.resolver_extension_id(Cur(), "", {}), 831)
         self.assertEqual(pedidos[0], ("", ""))
 
+    def test_id_historico_ausente_se_crea_con_el_siguiente_id_real(self):
+        """Un GIF no debe apuntar al 665 si ese id no existe en este esquema."""
+        carga, _ = gcp._heredados()
+        carga.USAR_SECUENCIAS = False
+
+        class Cur:
+            def __init__(self):
+                self.pedidos = []
+                self.resultados = [None, None, (42,)]
+
+            def execute(self, sql, params=None):
+                self.pedidos.append((" ".join(sql.split()), params))
+
+            def fetchone(self):
+                return self.resultados.pop(0)
+
+        cur = Cur()
+        self.assertEqual(carga.resolver_extension_id(cur, "gif", {}), 42)
+        self.assertIn("WHERE tipo = %s OR UPPER(tipo) = %s", cur.pedidos[0][0])
+        self.assertEqual(cur.pedidos[-1][1], [42, "gif"])
+
 
 def _jpeg() -> bytes:
     import io

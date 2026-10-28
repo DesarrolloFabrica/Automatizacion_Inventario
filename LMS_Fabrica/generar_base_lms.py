@@ -558,14 +558,12 @@ class IdResolver:
     def resolver_extension(self, tipo: str) -> int:
         """
         Resuelve extension_id sin duplicar formatos.
-        1) EXTENSION_MAP (ids fijos GCP)  2) lookup/create por tipo normalizado.
+        Con conexión usa el catálogo real; sin conexión conserva los IDs
+        históricos para que los CSV locales sigan siendo estables.
         """
         tipo_norm = normalizar_extension(tipo)  # vacía = sin extensión, como en GCP
         key = ("extension", "tipo", tipo_norm)
         if key in self.cache:
-            return self.cache[key]
-        if tipo_norm in EXTENSION_MAP:
-            self.cache[key] = EXTENSION_MAP[tipo_norm]
             return self.cache[key]
         found = self._lookup("extension", "tipo = %s", (tipo_norm,))
         if found is not None:
@@ -576,6 +574,9 @@ class IdResolver:
         if found_upper is not None:
             self.cache[key] = found_upper
             return found_upper
+        if not self.conn and tipo_norm in EXTENSION_MAP:
+            self.cache[key] = EXTENSION_MAP[tipo_norm]
+            return self.cache[key]
         return self._get_or_create("extension", "tipo", tipo_norm)
 
     def construir_fila(self, reg: dict, ahora: str) -> dict[str, str]:
